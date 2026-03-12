@@ -1,6 +1,8 @@
 using Microsoft.Build.Logging.StructuredLogger;
 using MSTask = Microsoft.Build.Logging.StructuredLogger.Task;
 
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+
 if (args.Length == 0 || args[0] is "-h" or "--help")
 {
     PrintUsage();
