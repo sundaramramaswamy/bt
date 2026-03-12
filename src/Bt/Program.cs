@@ -45,19 +45,39 @@ return args[cmdStart] switch
 
 static int ShowGraph(BuildGraph g)
 {
-    Console.WriteLine($"{g.Files.Count} files, {g.Commands.Count} commands");
-    Console.WriteLine($"root: {g.RootDir}");
+    // Developer-centric graph: only sources and final outputs.
+    // Intermediates (.obj) are collapsed — edges go directly from
+    // source (.cpp, .h, .cs, .idl, .rc) to final output (.exe, .dll, .lib).
+    var sources = g.Files.Values.Where(f => f.Kind == FileKind.Source).ToList();
+    var outputs = g.Files.Values.Where(f => f.Kind == FileKind.Output).ToList();
+
+    // Collect source→output edges by walking through the graph
+    var edges = new HashSet<(string src, string output)>();
+    foreach (var src in sources)
+        foreach (var output in g.GetOutputsOf(src.Path))
+            edges.Add((src.Path, output));
+
+    Console.WriteLine("digraph build {");
+    Console.WriteLine("  rankdir=LR;");
+    Console.WriteLine("  node [fontname=\"Consolas\" fontsize=10];");
     Console.WriteLine();
 
-    Console.WriteLine("Commands:");
-    foreach (var cmd in g.Commands.Values)
-        Console.WriteLine($"  {cmd.Id}: {cmd.Inputs.Count} in → {cmd.Outputs.Count} out");
+    // Only emit nodes that participate in edges
+    var nodeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var (s, o) in edges) { nodeSet.Add(s); nodeSet.Add(o); }
 
+    foreach (var path in nodeSet)
+    {
+        if (!g.Files.TryGetValue(path, out var f)) continue;
+        var shape = f.Kind == FileKind.Source ? "note" : "box3d";
+        Console.WriteLine($"  {Dot.Id(path)} [label=\"{Dot.Escape(path)}\" shape={shape}];");
+    }
     Console.WriteLine();
-    Console.WriteLine("Outputs:");
-    foreach (var f in g.Files.Values.Where(f => f.Kind == FileKind.Output))
-        Console.WriteLine($"  {g.ToAbsolute(f.Path)}");
 
+    foreach (var (s, o) in edges)
+        Console.WriteLine($"  {Dot.Id(s)} -> {Dot.Id(o)};");
+
+    Console.WriteLine("}");
     return 0;
 }
 
@@ -184,6 +204,16 @@ class BuildGraph
     // file → command that produces it
     public Dictionary<string, string> FileToProducer { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public void AddConsumer(string filePath, string cmdId)
+    {
+        if (!FileToConsumers.TryGetValue(filePath, out var list))
+        {
+            list = [];
+            FileToConsumers[filePath] = list;
+        }
+        list.Add(cmdId);
+    }
+
     /// Convert a root-relative path back to absolute.
     public string ToAbsolute(string relativePath) =>
         Path.GetFullPath(Path.Combine(RootDir, relativePath));
@@ -282,49 +312,46 @@ class BuildGraph
 
             if (sources.Count == 0) continue;
 
-            List<string> outputs;
-            FileKind outputKind;
-
             if (toolName == "CL")
             {
+                // CL batches N sources but the relationship is 1:1 (each .cpp → its .obj).
+                // Split into individual commands to keep the graph accurate.
                 var objDir = pf.FindChildrenRecursive<Property>(p => p.Name == "ObjectFileName")
                     .FirstOrDefault()?.Value ?? "";
                 var absObjDir = ResolveAbsolute(projDir, objDir);
-                outputs = sources.Select(s =>
-                    graph.ToRelative(Path.Combine(absObjDir,
-                        Path.GetFileNameWithoutExtension(s) + ".obj"))).ToList();
-                outputKind = FileKind.Intermediate;
+
+                foreach (var src in sources)
+                {
+                    var obj = graph.ToRelative(Path.Combine(absObjDir,
+                        Path.GetFileNameWithoutExtension(src) + ".obj"));
+                    var cmdId = $"CL#{cmdIndex++}:{proj}/{target}";
+                    var cmd = new CommandNode(cmdId, "CL", proj, target, [src], [obj]);
+                    graph.Commands[cmdId] = cmd;
+                    graph.Files.TryAdd(src, new FileNode(src, FileKind.Source));
+                    graph.Files.TryAdd(obj, new FileNode(obj, FileKind.Intermediate));
+                    graph.AddConsumer(src, cmdId);
+                    graph.FileToProducer[obj] = cmdId;
+                }
             }
-            else // Link or Lib
+            else // Link or Lib — N inputs → 1 output
             {
                 var outFile = pf.FindChildrenRecursive<Property>(p => p.Name == "OutputFile")
                     .FirstOrDefault()?.Value ?? "";
                 outFile = string.IsNullOrEmpty(outFile) ? ""
                     : graph.ToRelative(ResolveAbsolute(projDir, outFile));
-                outputs = string.IsNullOrEmpty(outFile) ? [] : [outFile];
-                outputKind = FileKind.Output;
-            }
+                if (string.IsNullOrEmpty(outFile)) continue;
 
-            var cmdId = $"{toolName}#{cmdIndex++}:{proj}/{target}";
-            var cmd = new CommandNode(cmdId, toolName, proj, target, sources, outputs);
-            graph.Commands[cmdId] = cmd;
+                var cmdId = $"{toolName}#{cmdIndex++}:{proj}/{target}";
+                var cmd = new CommandNode(cmdId, toolName, proj, target, sources, [outFile]);
+                graph.Commands[cmdId] = cmd;
+                graph.Files.TryAdd(outFile, new FileNode(outFile, FileKind.Output));
+                graph.FileToProducer[outFile] = cmdId;
 
-            // Register files
-            var inputKind = toolName == "CL" ? FileKind.Source : FileKind.Intermediate;
-            foreach (var input in sources)
-            {
-                graph.Files.TryAdd(input, new FileNode(input, inputKind));
-                if (!graph.FileToConsumers.TryGetValue(input, out var list))
+                foreach (var input in sources)
                 {
-                    list = [];
-                    graph.FileToConsumers[input] = list;
+                    graph.Files.TryAdd(input, new FileNode(input, FileKind.Intermediate));
+                    graph.AddConsumer(input, cmdId);
                 }
-                list.Add(cmdId);
-            }
-            foreach (var output in outputs)
-            {
-                graph.Files.TryAdd(output, new FileNode(output, outputKind));
-                graph.FileToProducer[output] = cmdId;
             }
         }
 
@@ -364,4 +391,23 @@ class BuildGraph
 
         return string.Join(Path.DirectorySeparatorChar, parts[..commonLen]);
     }
+}
+
+static class Dot
+{
+    static int _nextId;
+    static readonly Dictionary<string, string> _ids = new(StringComparer.OrdinalIgnoreCase);
+
+    public static string Id(string key)
+    {
+        if (!_ids.TryGetValue(key, out var id))
+        {
+            id = $"n{_nextId++}";
+            _ids[key] = id;
+        }
+        return id;
+    }
+
+    public static string Escape(string label) =>
+        label.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }
