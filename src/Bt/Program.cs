@@ -7,15 +7,34 @@ if (args.Length == 0 || args[0] is "-h" or "--help")
     return 0;
 }
 
-var binlogPath = Path.GetFullPath(@"msbuild.binlog");
+// Optional --binlog <path> before the subcommand
+var binlogPath = Path.GetFullPath("msbuild.binlog");
+int cmdStart = 0;
+if (args[0] == "--binlog" && args.Length >= 2)
+{
+    binlogPath = Path.GetFullPath(args[1]);
+    cmdStart = 2;
+}
+else if (args[0].StartsWith("--binlog="))
+{
+    binlogPath = Path.GetFullPath(args[0]["--binlog=".Length..]);
+    cmdStart = 1;
+}
+
+if (cmdStart >= args.Length)
+{
+    PrintUsage();
+    return 1;
+}
+
 var graph = LoadGraph(binlogPath);
 
-return args[0] switch
+return args[cmdStart] switch
 {
     "graph" => ShowGraph(graph),
-    "outputs-of" => OutputsOf(graph, args[1..]),
-    "sources-of" => SourcesOf(graph, args[1..]),
-    _ => Error($"Unknown command: {args[0]}")
+    "outputs-of" => OutputsOf(graph, args[(cmdStart + 1)..]),
+    "sources-of" => SourcesOf(graph, args[(cmdStart + 1)..]),
+    _ => Error($"Unknown command: {args[cmdStart]}")
 };
 
 // ============================================================
@@ -120,15 +139,17 @@ static void PrintUsage()
     Console.WriteLine("""
     bt — MSBuild dependency graph explorer
 
-    Usage:  bt <command> [args]
+    Usage:  bt [--binlog <path>] <command> [args]
+
+    Options:
+      --binlog <path>       Path to .binlog file (default: msbuild.binlog)
 
     Commands:
       graph                 Show graph summary (files, commands, outputs)
       outputs-of <file>     What outputs get built when <file> changes?
       sources-of <file>     What source files feed into <file>?
 
-    The binlog is read from msbuild.binlog in the current directory.
-    Generate one with: msbuild /bl
+    Generate a binlog with: msbuild /bl
     """);
 }
 
