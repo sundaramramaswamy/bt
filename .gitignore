@@ -1,0 +1,3 @@
+*.binlog
+tmp/
+copilot-session-*.md

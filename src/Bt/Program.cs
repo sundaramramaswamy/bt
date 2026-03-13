@@ -1,58 +1,67 @@
+using System.CommandLine;
 using Microsoft.Build.Logging.StructuredLogger;
 using MSTask = Microsoft.Build.Logging.StructuredLogger.Task;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-if (args.Length == 0 || args[0] is "-h" or "--help")
+// -- Global options (Recursive = visible on all subcommands) --
+var binlogOption = new Option<string>("--binlog") { Description = "Path to .binlog file", Recursive = true };
+binlogOption.DefaultValueFactory = _ => "msbuild.binlog";
+
+var colorOption = new Option<string>("--color") { Description = "Coloured output: auto, always, never", Recursive = true };
+colorOption.Aliases.Add("--colour");
+colorOption.DefaultValueFactory = _ => "auto";
+colorOption.AcceptOnlyFromAmong("auto", "always", "never");
+
+// -- Subcommands --
+var graphCmd = new Command("graph", "Emit Graphviz DOT dependency graph");
+
+var outputsFilesArg = new Argument<string[]>("files") { Description = "Source files to query", Arity = ArgumentArity.OneOrMore };
+var outputsOfCmd = new Command("outputs-of", "What outputs get built when <file> changes?");
+outputsOfCmd.Add(outputsFilesArg);
+
+var sourcesFilesArg = new Argument<string[]>("files") { Description = "Output files to query", Arity = ArgumentArity.OneOrMore };
+var sourcesOfCmd = new Command("sources-of", "What source files feed into <file>?");
+sourcesOfCmd.Add(sourcesFilesArg);
+
+// -- Wire up --
+var root = new RootCommand("bt — MSBuild dependency graph explorer");
+root.Add(binlogOption);
+root.Add(colorOption);
+root.Add(graphCmd);
+root.Add(outputsOfCmd);
+root.Add(sourcesOfCmd);
+
+graphCmd.SetAction(result =>
 {
-    PrintUsage();
-    return 0;
+    var g = Setup(result);
+    return ShowGraph(g);
+});
+
+outputsOfCmd.SetAction(result =>
+{
+    var g = Setup(result);
+    var files = result.GetValue(outputsFilesArg)!;
+    return OutputsOf(g, files);
+});
+
+sourcesOfCmd.SetAction(result =>
+{
+    var g = Setup(result);
+    var files = result.GetValue(sourcesFilesArg)!;
+    return SourcesOf(g, files);
+});
+
+return root.Parse(args).Invoke();
+
+// -- Helpers --
+BuildGraph Setup(ParseResult result)
+{
+    var binlog = result.GetValue(binlogOption)!;
+    var color = result.GetValue(colorOption)!;
+    Clr.SetMode(color);
+    return LoadGraph(Path.GetFullPath(binlog));
 }
-
-// Parse global flags before the subcommand
-var binlogPath = Path.GetFullPath("msbuild.binlog");
-int cmdStart = 0;
-while (cmdStart < args.Length && args[cmdStart].StartsWith('-'))
-{
-    var a = args[cmdStart];
-    if (a == "--binlog" && cmdStart + 1 < args.Length)
-    {
-        binlogPath = Path.GetFullPath(args[++cmdStart]);
-        cmdStart++;
-    }
-    else if (a.StartsWith("--binlog="))
-    {
-        binlogPath = Path.GetFullPath(a["--binlog=".Length..]);
-        cmdStart++;
-    }
-    else if (a is "--color" or "--colour" && cmdStart + 1 < args.Length)
-    {
-        Clr.SetMode(args[++cmdStart]);
-        cmdStart++;
-    }
-    else if (a.StartsWith("--color=") || a.StartsWith("--colour="))
-    {
-        Clr.SetMode(a[(a.IndexOf('=') + 1)..]);
-        cmdStart++;
-    }
-    else break;
-}
-
-if (cmdStart >= args.Length)
-{
-    PrintUsage();
-    return 1;
-}
-
-var graph = LoadGraph(binlogPath);
-
-return args[cmdStart] switch
-{
-    "graph" => ShowGraph(graph),
-    "outputs-of" => OutputsOf(graph, args[(cmdStart + 1)..]),
-    "sources-of" => SourcesOf(graph, args[(cmdStart + 1)..]),
-    _ => Error($"Unknown command: {args[cmdStart]}")
-};
 
 // ============================================================
 // Commands
@@ -96,8 +105,6 @@ static int ShowGraph(BuildGraph g)
 
 static int OutputsOf(BuildGraph g, string[] files)
 {
-    if (files.Length == 0) return Error("Usage: bt outputs-of <file> [file...]");
-
     foreach (var file in files)
     {
         var resolved = ResolveFileArg(g, file);
@@ -113,8 +120,6 @@ static int OutputsOf(BuildGraph g, string[] files)
 
 static int SourcesOf(BuildGraph g, string[] files)
 {
-    if (files.Length == 0) return Error("Usage: bt sources-of <file> [file...]");
-
     foreach (var file in files)
     {
         var resolved = ResolveFileArg(g, file);
@@ -171,28 +176,6 @@ static BuildGraph LoadGraph(string binlogPath)
     }
     var build = BinaryLog.ReadBuild(binlogPath);
     return BuildGraph.FromBinlog(build);
-}
-
-static int Error(string msg) { Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} {msg}"); return 1; }
-
-static void PrintUsage()
-{
-    Console.WriteLine($"""
-    {Clr.Bold}bt{Clr.Reset} — MSBuild dependency graph explorer
-
-    {Clr.Bold}Usage:{Clr.Reset}  bt [options] <command> [args]
-
-    {Clr.Bold}Options:{Clr.Reset}
-      --binlog <path>       Path to .binlog file (default: msbuild.binlog)
-      --color <when>        Coloured output: auto, always, never (default: auto)
-
-    {Clr.Bold}Commands:{Clr.Reset}
-      {Clr.Cyan}graph{Clr.Reset}                 Emit Graphviz DOT dependency graph
-      {Clr.Cyan}outputs-of{Clr.Reset} <file>     What outputs get built when <file> changes?
-      {Clr.Cyan}sources-of{Clr.Reset} <file>     What source files feed into <file>?
-
-    Generate a binlog with: {Clr.Dim}msbuild /bl{Clr.Reset}
-    """);
 }
 
 // ============================================================

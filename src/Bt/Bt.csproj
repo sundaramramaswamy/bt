@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="MSBuild.StructuredLogger" Version="2.3.113" />
+    <PackageReference Include="System.CommandLine" Version="2.0.5" />
   </ItemGroup>
 
 </Project>
