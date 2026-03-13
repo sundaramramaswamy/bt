@@ -320,7 +320,7 @@ class BuildGraph
         // Track CL command IDs per project so we can wire headers to them later.
         var clCmdsByProject = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name is "CL" or "Link" or "Lib"))
+        foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name is "CL" or "Link" or "Lib" or "MIDL"))
         {
             var projNode = task.GetNearestParent<Project>();
             var proj = projNode?.Name ?? "unknown";
@@ -338,7 +338,8 @@ class BuildGraph
                 .Select(i => graph.ToRelative(ResolveAbsolute(projDir, i.Text)))
                 .ToList() ?? [];
 
-            if (sources.Count == 0) continue;
+            // MIDL uses a Source property (singular), not Sources items
+            if (sources.Count == 0 && toolName != "MIDL") continue;
 
             if (toolName == "CL")
             {
@@ -367,6 +368,27 @@ class BuildGraph
                     }
                     projCmds.Add(cmdId);
                 }
+            }
+            else if (toolName == "MIDL")
+            {
+                // MIDL compiles one .idl at a time; Source is a property, not items.
+                var srcProp = pf.FindChildrenRecursive<Property>(p => p.Name == "Source")
+                    .FirstOrDefault()?.Value ?? "";
+                if (string.IsNullOrEmpty(srcProp)) continue;
+                var src = graph.ToRelative(ResolveAbsolute(projDir, srcProp));
+
+                var metaProp = pf.FindChildrenRecursive<Property>(p => p.Name == "MetadataFileName")
+                    .FirstOrDefault()?.Value ?? "";
+                if (string.IsNullOrEmpty(metaProp)) continue;
+                var meta = graph.ToRelative(ResolveAbsolute(projDir, metaProp));
+
+                var cmdId = $"MIDL#{cmdIndex++}:{proj}/{target}";
+                var cmd = new CommandNode(cmdId, "MIDL", proj, target, [src], [meta]);
+                graph.Commands[cmdId] = cmd;
+                graph.Files.TryAdd(src, new FileNode(src, FileKinds.Classify(src)));
+                graph.Files.TryAdd(meta, new FileNode(meta, FileKinds.Classify(meta)));
+                graph.AddConsumer(src, cmdId);
+                graph.FileToProducer[meta] = cmdId;
             }
             else // Link or Lib — N inputs → 1 output
             {
