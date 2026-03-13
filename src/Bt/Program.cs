@@ -254,6 +254,7 @@ class BuildGraph
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         WalkForward(sourcePath, visited, result);
+        result.Remove(sourcePath); // exclude self-edges
         return result;
     }
 
@@ -447,6 +448,8 @@ class BuildGraph
         // CompileXaml: .xaml → generated .xaml.g.h, .g.cpp, .xbf
         // Structured in the binlog: XamlPages/XamlApplications as inputs,
         // _GeneratedCodeFiles/_GeneratedXbfFiles as outputs.
+        // Split into 1:1 commands per .xaml file (like CL) to avoid N×N edges.
+        // Shared outputs (XamlTypeInfo.g.cpp etc.) go in a separate command.
         foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name == "CompileXaml"))
         {
             var projNode = task.GetNearestParent<Project>();
@@ -472,7 +475,7 @@ class BuildGraph
 
             // Gather output files from OutputItems
             var of = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "OutputItems");
-            var xamlOutputs = new List<string>();
+            var allOutputs = new List<string>();
             if (of != null)
             {
                 foreach (var paramName in new[] { "_GeneratedCodeFiles", "_GeneratedXbfFiles" })
@@ -481,24 +484,56 @@ class BuildGraph
                         .Where(n => n.Name == paramName)
                         .SelectMany(n => n.Children.OfType<Item>())
                         .Select(i => graph.ToRelative(ResolveAbsolute(projDir, i.Text)));
-                    xamlOutputs.AddRange(items);
+                    allOutputs.AddRange(items);
                 }
             }
-            if (xamlOutputs.Count == 0) continue;
+            if (allOutputs.Count == 0) continue;
 
-            var cmdId = $"CompileXaml#{cmdIndex++}:{proj}/{target}";
-            var cmd = new CommandNode(cmdId, "CompileXaml", proj, target, xamlInputs, xamlOutputs);
-            graph.Commands[cmdId] = cmd;
-
-            foreach (var input in xamlInputs)
+            // Match each .xaml to its outputs by stem (e.g. MainWindow.xaml → MainWindow.xaml.g.h + MainWindow.xbf)
+            var sharedOutputs = new List<string>(allOutputs);
+            foreach (var xaml in xamlInputs)
             {
-                graph.Files.TryAdd(input, new FileNode(input, FileKinds.Classify(input)));
-                graph.AddConsumer(input, cmdId);
+                var stem = Path.GetFileNameWithoutExtension(xaml); // "MainWindow.xaml" → "MainWindow"
+                var fullStem = Path.GetFileName(xaml);              // "MainWindow.xaml"
+                var matched = allOutputs
+                    .Where(o => {
+                        var fn = Path.GetFileName(o);
+                        return fn.StartsWith(fullStem + ".", StringComparison.OrdinalIgnoreCase)
+                            || fn.StartsWith(stem + ".xbf", StringComparison.OrdinalIgnoreCase);
+                    }).ToList();
+                if (matched.Count == 0) continue;
+
+                foreach (var m in matched) sharedOutputs.Remove(m);
+
+                var cmdId = $"CompileXaml#{cmdIndex++}:{proj}/{target}";
+                var cmd = new CommandNode(cmdId, "CompileXaml", proj, target, [xaml], matched);
+                graph.Commands[cmdId] = cmd;
+                graph.Files.TryAdd(xaml, new FileNode(xaml, FileKinds.Classify(xaml)));
+                graph.AddConsumer(xaml, cmdId);
+                foreach (var output in matched)
+                {
+                    graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
+                    graph.FileToProducer.TryAdd(output, cmdId);
+                }
             }
-            foreach (var output in xamlOutputs)
+
+            // Shared outputs (XamlTypeInfo.g.cpp, XamlLibMetadataProvider.g.cpp, etc.)
+            // are produced from all .xaml inputs collectively.
+            if (sharedOutputs.Count > 0)
             {
-                graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
-                graph.FileToProducer.TryAdd(output, cmdId);
+                var cmdId = $"CompileXaml#{cmdIndex++}:{proj}/{target}";
+                var cmd = new CommandNode(cmdId, "CompileXaml", proj, target, xamlInputs, sharedOutputs);
+                graph.Commands[cmdId] = cmd;
+                foreach (var input in xamlInputs)
+                {
+                    graph.Files.TryAdd(input, new FileNode(input, FileKinds.Classify(input)));
+                    graph.AddConsumer(input, cmdId);
+                }
+                foreach (var output in sharedOutputs)
+                {
+                    graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
+                    graph.FileToProducer.TryAdd(output, cmdId);
+                }
             }
         }
 
