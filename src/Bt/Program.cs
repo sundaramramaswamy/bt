@@ -752,7 +752,62 @@ class BuildGraph
             graph.FileToProducer[outRel] = cmdId;
         }
 
-        // AppxPackageRecipe: WinAppSdkGenerateAppxPackageRecipe
+        // Copy tasks: SourceFiles → DestinationFiles (1:1 parallel lists or scalar).
+        // Only wire copies where the source is already tracked in the graph.
+        foreach (var copyTask in build.FindChildrenRecursive<MSTask>(t => t.Name == "Copy"))
+        {
+            var projNode7 = copyTask.GetNearestParent<Project>();
+            var proj7 = projNode7?.Name ?? "unknown";
+            var projDir7 = projNode7?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(projNode7.ProjectFile)) ?? ""
+                : "";
+            var pf7 = copyTask.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            if (pf7 == null) continue;
+
+            // Collect source and dest lists (may be Parameter with Items, or scalar Property)
+            var srcItems = pf7.FindChildrenRecursive<Parameter>(p => p.Name == "SourceFiles")
+                .FirstOrDefault()?.Children.OfType<Item>()
+                .Select(i => i.Text).ToList();
+            var dstItems = pf7.FindChildrenRecursive<Parameter>(p => p.Name == "DestinationFiles")
+                .FirstOrDefault()?.Children.OfType<Item>()
+                .Select(i => i.Text).ToList();
+
+            // Scalar form: single Property instead of Parameter
+            if (srcItems == null || srcItems.Count == 0)
+            {
+                var srcProp = pf7.FindChildrenRecursive<Property>(p => p.Name == "SourceFiles")
+                    .FirstOrDefault()?.Value;
+                var dstProp = pf7.FindChildrenRecursive<Property>(p => p.Name == "DestinationFiles")
+                    .FirstOrDefault()?.Value;
+                if (srcProp != null && dstProp != null)
+                {
+                    srcItems = [srcProp];
+                    dstItems = [dstProp];
+                }
+                else continue;
+            }
+            if (dstItems == null || srcItems.Count != dstItems.Count) continue;
+
+            var target7 = copyTask.GetNearestParent<Target>()?.Name ?? "unknown";
+
+            for (int i = 0; i < srcItems.Count; i++)
+            {
+                var srcRel = graph.ToRelative(ResolveAbsolute(projDir7, srcItems[i]));
+                var dstRel = graph.ToRelative(ResolveAbsolute(projDir7, dstItems[i]));
+                // Only wire if source is already in the graph
+                if (!graph.Files.ContainsKey(srcRel)) continue;
+                // Skip identity copies
+                if (string.Equals(srcRel, dstRel, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var cmdId = $"Copy#{cmdIndex++}:{proj7}/{target7}";
+                var cmd = new CommandNode(cmdId, "Copy", proj7, target7, [srcRel], [dstRel]);
+                graph.Commands[cmdId] = cmd;
+                graph.AddConsumer(srcRel, cmdId);
+                graph.Files.TryAdd(dstRel, new FileNode(dstRel, FileKinds.Classify(dstRel)));
+                graph.FileToProducer.TryAdd(dstRel, cmdId);
+            }
+        }
+        // AppxPackageRecipe: WinAppSdkGenerateAppxPackageRecipe
         // Gathers payload (.exe, .winmd, .pri, AppxManifest, assets) → .build.appxrecipe
         // We connect only payload items already tracked in the graph as inputs.
         foreach (var recipeTask in build.FindChildrenRecursive<MSTask>(
@@ -797,6 +852,7 @@ class BuildGraph
             graph.Files.TryAdd(recipeRel, new FileNode(recipeRel, FileKinds.Classify(recipeRel)));
             graph.FileToProducer[recipeRel] = cmdId;
         }
+
 
         return graph;
     }
