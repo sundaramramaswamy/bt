@@ -641,6 +641,50 @@ class BuildGraph
             }
         }
 
+        // mdmerge: Exec tasks in CppWinRTMergeProjectWinMDInputs target.
+        // Messages tell us input and output .winmd files.
+        // "Processing input metadata file ARM64\Release\Unmerged\Foo.winmd."
+        // "Validating metadata file ARM64\Release\Merged\Bar.winmd."
+        foreach (var exec in build.FindChildrenRecursive<MSTask>(
+            t => t.Name == "Exec"
+                 && (t.GetNearestParent<Target>()?.Name == "CppWinRTMergeProjectWinMDInputs")))
+        {
+            var projNode = exec.GetNearestParent<Project>();
+            var proj = projNode?.Name ?? "unknown";
+            var projDir3 = projNode?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(projNode.ProjectFile)) ?? ""
+                : "";
+
+            var inputs = new List<string>();
+            string? output = null;
+
+            foreach (var msg in exec.FindChildrenRecursive<Message>())
+            {
+                var text = msg.Text ?? "";
+                if (text.StartsWith("Processing input metadata file "))
+                {
+                    var rel = text["Processing input metadata file ".Length..].TrimEnd('.');
+                    inputs.Add(graph.ToRelative(ResolveAbsolute(projDir3, rel)));
+                }
+                else if (text.StartsWith("Validating metadata file "))
+                {
+                    var rel = text["Validating metadata file ".Length..].TrimEnd('.');
+                    output = graph.ToRelative(ResolveAbsolute(projDir3, rel));
+                }
+            }
+
+            if (output != null && inputs.Count > 0)
+            {
+                var target = exec.GetNearestParent<Target>()?.Name ?? "unknown";
+                var cmdId = $"mdmerge#{cmdIndex++}:{proj}/{target}";
+                var cmd = new CommandNode(cmdId, "mdmerge", proj, target, inputs, [output]);
+                graph.Commands[cmdId] = cmd;
+                foreach (var inp in inputs) graph.AddConsumer(inp, cmdId);
+                graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
+                graph.FileToProducer[output] = cmdId;
+            }
+        }
+
         return graph;
     }
 
