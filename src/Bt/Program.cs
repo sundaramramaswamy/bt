@@ -1159,6 +1159,14 @@ class BuildGraph
                 var absObjDir = ResolveAbsolute(projDir, objDir);
                 objDirsByProject.TryAdd(proj, absObjDir);
 
+                // PCH detection: /Yc = create, /Yu = use
+                var pchOutFile = pf.FindChildrenRecursive<Property>(p => p.Name == "PrecompiledHeaderOutputFile")
+                    .FirstOrDefault()?.Value ?? "";
+                var pchPath = string.IsNullOrEmpty(pchOutFile) ? ""
+                    : graph.ToRelative(ResolveAbsolute(projDir, pchOutFile));
+                bool createsYc = cmdLineRaw.Contains("/Yc");
+                bool usesYu = cmdLineRaw.Contains("/Yu");
+
                 foreach (var src in sources)
                 {
                     var obj = graph.ToRelative(Path.Combine(absObjDir,
@@ -1168,12 +1176,25 @@ class BuildGraph
                     var absSrc = Path.GetFullPath(Path.Combine(graph.RootDir, src));
                     var absObj = Path.GetFullPath(Path.Combine(graph.RootDir, obj));
                     var clCmdLine = BuildClCommandLine(cmdLineRaw, absSrc, absObj, sources.Count);
-                    var cmd = new CommandNode(cmdId, "CL", proj, target, [src], [obj], clCmdLine, projDir);
+
+                    var inputs = new List<string> { src };
+                    var outputs = new List<string> { obj };
+
+                    // /Yc command (pch.cpp): also produces pch.pch
+                    if (createsYc && !string.IsNullOrEmpty(pchPath))
+                        outputs.Add(pchPath);
+                    // /Yu command (regular .cpp): depends on pch.pch
+                    if (usesYu && !string.IsNullOrEmpty(pchPath))
+                        inputs.Add(pchPath);
+
+                    var cmd = new CommandNode(cmdId, "CL", proj, target, inputs, outputs, clCmdLine, projDir);
                     graph.Commands[cmdId] = cmd;
                     graph.Files.TryAdd(src, new FileNode(src, FileKinds.Classify(src)));
                     graph.Files.TryAdd(obj, new FileNode(obj, FileKinds.Classify(obj)));
-                    graph.AddConsumer(src, cmdId);
-                    graph.FileToProducer[obj] = cmdId;
+                    if (!string.IsNullOrEmpty(pchPath))
+                        graph.Files.TryAdd(pchPath, new FileNode(pchPath, FileKind.Intermediate));
+                    foreach (var i in inputs) graph.AddConsumer(i, cmdId);
+                    foreach (var o in outputs) graph.FileToProducer.TryAdd(o, cmdId);
 
                     // Record absolute source path for tlog matching
                     clCmdByAbsSource.TryAdd(absSrc, cmdId);
