@@ -446,19 +446,22 @@ static int CompileCommands(BuildGraph g, string? outputPath)
         .Where(c => c.Tool == "CL" && !string.IsNullOrEmpty(c.CommandLine))
         .Select(c =>
         {
-            // First input is the source file; resolve to absolute for the spec
             var file = c.Inputs.Count > 0
                 ? Path.GetFullPath(Path.Combine(g.RootDir, c.Inputs[0]))
                 : "";
             var dir = !string.IsNullOrEmpty(c.WorkingDir) ? c.WorkingDir : g.RootDir;
-            return new { directory = dir, command = c.CommandLine, file };
+            return new CompileCommandEntry { Directory = dir, Command = c.CommandLine, File = file };
         })
         .ToList();
 
     var outFile = outputPath ?? Path.Combine(g.RootDir, "compile_commands.json");
-    var json = System.Text.Json.JsonSerializer.Serialize(entries,
-        new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-    File.WriteAllText(outFile, json);
+    using var fs = File.Create(outFile);
+    using var writer = new System.Text.Json.Utf8JsonWriter(fs, new System.Text.Json.JsonWriterOptions
+    {
+        Indented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    });
+    JsonSerializer.Serialize(writer, entries, CompileDbJsonContext.Default.ListCompileCommandEntry);
     Console.Error.WriteLine($"Wrote {entries.Count} entries to {outFile}");
     return 0;
 }
@@ -1966,12 +1969,6 @@ class GraphCache
     public List<CachedCommand> Commands { get; set; } = [];
     public List<string> ExternalPrefixes { get; set; } = [];
 
-    static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        WriteIndented = false,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
-
     public static void Save(string path, BuildGraph graph, DateTime binlogStamp)
     {
         var cache = new GraphCache
@@ -1989,14 +1986,14 @@ class GraphCache
         };
         using var fs = File.Create(path);
         using var gz = new GZipStream(fs, CompressionLevel.Optimal);
-        JsonSerializer.Serialize(gz, cache, JsonOpts);
+        JsonSerializer.Serialize(gz, cache, BtJsonContext.Default.GraphCache);
     }
 
     public static GraphCache? Load(string path)
     {
         using var fs = File.OpenRead(path);
         using var gz = new GZipStream(fs, CompressionMode.Decompress);
-        return JsonSerializer.Deserialize<GraphCache>(gz, JsonOpts);
+        return JsonSerializer.Deserialize(gz, BtJsonContext.Default.GraphCache);
     }
 
     public BuildGraph ToGraph()
@@ -2048,3 +2045,22 @@ class CachedCommand
     public string CommandLine { get; set; } = "";
     public string WorkingDir { get; set; } = "";
 }
+
+class CompileCommandEntry
+{
+    public string Directory { get; set; } = "";
+    public string Command { get; set; } = "";
+    public string File { get; set; } = "";
+}
+
+[System.Text.Json.Serialization.JsonSerializableAttribute(typeof(GraphCache))]
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(
+    PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase,
+    WriteIndented = false)]
+partial class BtJsonContext : System.Text.Json.Serialization.JsonSerializerContext { }
+
+[System.Text.Json.Serialization.JsonSerializableAttribute(typeof(List<CompileCommandEntry>))]
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(
+    PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase,
+    WriteIndented = true)]
+partial class CompileDbJsonContext : System.Text.Json.Serialization.JsonSerializerContext { }
