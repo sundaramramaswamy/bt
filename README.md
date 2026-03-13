@@ -37,8 +37,8 @@ bt graph -p MyProject         # DOT graph filtered to one project
 bt graph -f MyFile.cpp        # DOT subgraph around one file
 ```
 
-The graph is cached to `.bt/graph.json` — subsequent runs skip binlog parsing
-unless the binlog changes.
+The graph is cached to `.bt/<name>.graph.json.gz` — subsequent runs skip binlog
+parsing unless the binlog changes.
 
 ## Commands
 
@@ -93,13 +93,24 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 
 2. **Tlog enrichment** — If CL tracker logs (`.tlog`) exist in intermediate dirs, `bt` reads them to wire precise `#include` edges: `header.h → [#include] → source.cpp`. Falls back to conservative `ClInclude` if tlogs are missing.
 
-3. **Cache** — The graph serializes to `.bt/graph.json`. Invalidated when the binlog's timestamp changes.
+3. **Cache** — The graph serializes to `.bt/<name>.graph.json.gz` (GZip-compressed). Invalidated when the binlog's timestamp changes.
 
 4. **Query** — `bins`/`srcs` walk the graph forward/backward, printing a tree. `dirty` computes a topo-sorted build plan using file timestamps (like `make`/`ninja`). `graph` emits DOT for visualization.
 
-5. **Build** — `build` executes dirty commands in parallel waves, invoking `cl.exe`, `link.exe`, etc. directly — no MSBuild overhead.
+5. **Build** — `build` executes dirty commands in parallel, invoking `cl.exe`, `link.exe`, etc. directly — no MSBuild overhead.
+
+## Building
+
+```bash
+# Development
+dotnet run --project src/Bt -- dirty
+
+# Release (single-file, self-contained, trimmed)
+dotnet publish src/Bt -c Release -r win-x64    # or win-arm64, linux-x64
+# Output: src/Bt/bin/Release/net10.0/<rid>/publish/Bt.exe
+```
 
 ## Requirements
 
-- .NET 10+ SDK
+- .NET 10+ SDK (build-time only; published binary is self-contained)
 - A binary log from a full solution build (`msbuild -bl`)
