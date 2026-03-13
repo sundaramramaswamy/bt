@@ -490,7 +490,34 @@ static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryR
 
     var remaining = new List<CommandNode>(plan);
     int failures = 0;
+    int completed = 0;
+    int total = plan.Count;
+    bool isTty = !Console.IsErrorRedirected;
     var sw = System.Diagnostics.Stopwatch.StartNew();
+    var statusLock = new object();
+
+    void WriteStatus(string tool, string file, bool done, bool failed = false)
+    {
+        lock (statusLock)
+        {
+            if (isTty)
+            {
+                // Erase current line, write status
+                var sym = done ? (failed ? $"{Clr.Red}✗" : $"{Clr.Green}✓") : $"{Clr.Cyan}…";
+                var counter = $"[{completed}/{total}]";
+                var shortFile = Path.GetFileName(file);
+                var line = $"\r{Clr.Bold}{counter}{Clr.Reset} {sym}{Clr.Reset} [{tool}] {shortFile}";
+                Console.Error.Write(line + new string(' ', Math.Max(0, Console.WindowWidth - line.Length + 20)));
+                if (done && failed)
+                    Console.Error.WriteLine(); // preserve failed lines
+            }
+            else if (done)
+            {
+                var sym = failed ? "✗" : "✓";
+                Console.Error.WriteLine($"  {sym} [{tool}] {file}");
+            }
+        }
+    }
 
     while (remaining.Count > 0)
     {
@@ -498,6 +525,7 @@ static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryR
         var wave = remaining.Where(c => c.Inputs.All(i => produced.Contains(i))).ToList();
         if (wave.Count == 0)
         {
+            if (isTty) Console.Error.WriteLine(); // clear status line
             Console.Error.WriteLine($"{Clr.Red}Deadlock: {remaining.Count} commands stuck (missing inputs){Clr.Reset}");
             foreach (var c in remaining)
             {
@@ -509,37 +537,42 @@ static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryR
 
         foreach (var c in wave) remaining.Remove(c);
 
-        Console.Error.WriteLine($"{Clr.Dim}── wave: {wave.Count} commands ──{Clr.Reset}");
-
-        // Run wave in parallel
+        // Run wave in parallel with live progress
         var results = new System.Collections.Concurrent.ConcurrentBag<(CommandNode cmd, int exitCode, string output)>();
         Parallel.ForEach(wave, new ParallelOptions { MaxDegreeOfParallelism = maxJobs }, cmd =>
         {
+            WriteStatus(cmd.Tool, cmd.Outputs.FirstOrDefault() ?? cmd.Id, done: false);
             var (exitCode, output) = ExecuteCommand(cmd);
+            Interlocked.Increment(ref completed);
             results.Add((cmd, exitCode, output));
+            WriteStatus(cmd.Tool, cmd.Outputs.FirstOrDefault() ?? cmd.Id, done: true, failed: exitCode != 0);
         });
 
-        // Process results
+        // Process results — mark outputs as produced (or not on failure)
         foreach (var (cmd, exitCode, output) in results)
         {
             if (exitCode == 0)
             {
-                Console.Error.WriteLine($"  {Clr.Green}✓{Clr.Reset} [{cmd.Tool}] {cmd.Outputs.FirstOrDefault() ?? cmd.Id}");
                 foreach (var o in cmd.Outputs) produced.Add(o);
             }
             else
             {
                 failures++;
+                if (isTty) Console.Error.WriteLine(); // newline after status
                 Console.Error.WriteLine($"  {Clr.Red}✗{Clr.Reset} [{cmd.Tool}] {cmd.Outputs.FirstOrDefault() ?? cmd.Id}  (exit {exitCode})");
                 if (!string.IsNullOrWhiteSpace(output))
                     Console.Error.WriteLine(output);
-                // Don't produce outputs — downstream commands will be stuck (caught by deadlock check)
             }
         }
     }
 
+    if (isTty)
+    {
+        // Clear the status line and print summary
+        Console.Error.Write($"\r{new string(' ', Math.Max(Console.WindowWidth, 40))}\r");
+    }
+
     sw.Stop();
-    Console.Error.WriteLine();
     if (failures == 0)
         Console.Error.WriteLine($"{Clr.Green}Build succeeded{Clr.Reset} ({plan.Count} commands, {sw.Elapsed.TotalSeconds:F1}s)");
     else
