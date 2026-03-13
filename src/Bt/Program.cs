@@ -89,9 +89,9 @@ static int OutputsOf(BuildGraph g, string[] files)
         if (resolved == null) continue;
 
         var outputs = g.GetOutputsOf(resolved);
-        Console.WriteLine($"{file}:");
+        Console.WriteLine($"{Clr.Cyan}{file}{Clr.Reset}:");
         foreach (var o in outputs)
-            Console.WriteLine($"  → {g.ToAbsolute(o)}");
+            Console.WriteLine($"  → {Clr.Yellow}{g.ToAbsolute(o)}{Clr.Reset}");
     }
     return 0;
 }
@@ -106,9 +106,15 @@ static int SourcesOf(BuildGraph g, string[] files)
         if (resolved == null) continue;
 
         var sources = g.GetSourcesOf(resolved);
-        Console.WriteLine($"{file}:");
+        Console.WriteLine($"{Clr.Cyan}{file}{Clr.Reset}:");
         foreach (var s in sources)
-            Console.WriteLine($"  ← {g.ToAbsolute(s)}");
+        {
+            var clr = s.EndsWith(".h", StringComparison.OrdinalIgnoreCase)
+                    || s.EndsWith(".hpp", StringComparison.OrdinalIgnoreCase)
+                    || s.EndsWith(".hxx", StringComparison.OrdinalIgnoreCase)
+                    ? Clr.Magenta : Clr.Green;
+            Console.WriteLine($"  ← {clr}{g.ToAbsolute(s)}{Clr.Reset}");
+        }
     }
     return 0;
 }
@@ -132,11 +138,11 @@ static string? ResolveFileArg(BuildGraph g, string arg)
     if (matches.Count == 1) return matches[0];
     if (matches.Count > 1)
     {
-        Console.Error.WriteLine($"{arg}: ambiguous — matches {matches.Count} files:");
-        foreach (var m in matches) Console.Error.WriteLine($"  {m}");
+        Console.Error.WriteLine($"{Clr.Yellow}{arg}{Clr.Reset}: ambiguous — matches {matches.Count} files:");
+        foreach (var m in matches) Console.Error.WriteLine($"  {Clr.Dim}{m}{Clr.Reset}");
         return null;
     }
-    Console.Error.WriteLine($"{arg}: not found in graph");
+    Console.Error.WriteLine($"{Clr.Red}{arg}{Clr.Reset}: not found in graph");
     return null;
 }
 
@@ -144,32 +150,32 @@ static BuildGraph LoadGraph(string binlogPath)
 {
     if (!File.Exists(binlogPath))
     {
-        Console.Error.WriteLine($"binlog not found: {binlogPath}");
-        Console.Error.WriteLine("Run a full build with: msbuild /bl");
+        Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} binlog not found: {Clr.Yellow}{binlogPath}{Clr.Reset}");
+        Console.Error.WriteLine($"Run a full build with: {Clr.Dim}msbuild /bl{Clr.Reset}");
         Environment.Exit(1);
     }
     var build = BinaryLog.ReadBuild(binlogPath);
     return BuildGraph.FromBinlog(build);
 }
 
-static int Error(string msg) { Console.Error.WriteLine(msg); return 1; }
+static int Error(string msg) { Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} {msg}"); return 1; }
 
 static void PrintUsage()
 {
-    Console.WriteLine("""
-    bt — MSBuild dependency graph explorer
+    Console.WriteLine($"""
+    {Clr.Bold}bt{Clr.Reset} — MSBuild dependency graph explorer
 
-    Usage:  bt [--binlog <path>] <command> [args]
+    {Clr.Bold}Usage:{Clr.Reset}  bt [--binlog <path>] <command> [args]
 
-    Options:
+    {Clr.Bold}Options:{Clr.Reset}
       --binlog <path>       Path to .binlog file (default: msbuild.binlog)
 
-    Commands:
-      graph                 Show graph summary (files, commands, outputs)
-      outputs-of <file>     What outputs get built when <file> changes?
-      sources-of <file>     What source files feed into <file>?
+    {Clr.Bold}Commands:{Clr.Reset}
+      {Clr.Cyan}graph{Clr.Reset}                 Emit Graphviz DOT dependency graph
+      {Clr.Cyan}outputs-of{Clr.Reset} <file>     What outputs get built when <file> changes?
+      {Clr.Cyan}sources-of{Clr.Reset} <file>     What source files feed into <file>?
 
-    Generate a binlog with: msbuild /bl
+    Generate a binlog with: {Clr.Dim}msbuild /bl{Clr.Reset}
     """);
 }
 
@@ -469,4 +475,20 @@ static class Dot
 
     public static string Escape(string label) =>
         label.Replace("\\", "\\\\").Replace("\"", "\\\"");
+}
+
+/// ANSI colour helpers — disable automatically when stdout is redirected.
+static class Clr
+{
+    static readonly bool _enabled = !Console.IsOutputRedirected;
+
+    public static string Reset   => _enabled ? "\x1b[0m"  : "";
+    public static string Bold    => _enabled ? "\x1b[1m"  : "";
+    public static string Red     => _enabled ? "\x1b[31m" : "";
+    public static string Green   => _enabled ? "\x1b[32m" : "";
+    public static string Yellow  => _enabled ? "\x1b[33m" : "";
+    public static string Blue    => _enabled ? "\x1b[34m" : "";
+    public static string Magenta => _enabled ? "\x1b[35m" : "";
+    public static string Cyan    => _enabled ? "\x1b[36m" : "";
+    public static string Dim     => _enabled ? "\x1b[2m"  : "";
 }
