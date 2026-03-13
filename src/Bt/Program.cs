@@ -24,11 +24,11 @@ graphCmd.Add(graphFileOption);
 graphCmd.Add(graphProjectOption);
 
 var outputsFilesArg = new Argument<string[]>("files") { Description = "Source files to query", Arity = ArgumentArity.OneOrMore };
-var outputsOfCmd = new Command("outputs-of", "What outputs get built when <file> changes?");
+var outputsOfCmd = new Command("outs", "List all downstream files reachable from <file>");
 outputsOfCmd.Add(outputsFilesArg);
 
 var sourcesFilesArg = new Argument<string[]>("files") { Description = "Output files to query", Arity = ArgumentArity.OneOrMore };
-var sourcesOfCmd = new Command("sources-of", "What source files feed into <file>?");
+var sourcesOfCmd = new Command("srcs", "List all upstream files that feed into <file>");
 sourcesOfCmd.Add(sourcesFilesArg);
 
 // -- Wire up --
@@ -191,10 +191,18 @@ static int OutputsOf(BuildGraph g, string[] files)
         var resolved = ResolveFileArg(g, file);
         if (resolved == null) continue;
 
-        var outputs = g.GetOutputsOf(resolved);
+        var outputs = g.GetOutputsOf(resolved).OrderBy(o => o, StringComparer.OrdinalIgnoreCase);
         Console.WriteLine($"{Clr.Cyan}{file}{Clr.Reset}:");
         foreach (var o in outputs)
-            Console.WriteLine($"  → {Clr.Yellow}{g.ToAbsolute(o)}{Clr.Reset}");
+        {
+            var clr = g.Files.TryGetValue(o, out var f) ? f.Kind switch
+            {
+                FileKind.Source => Clr.Green,
+                FileKind.Output => Clr.Yellow,
+                _ => Clr.Dim
+            } : Clr.Dim;
+            Console.WriteLine($"  → {clr}{o}{Clr.Reset}");
+        }
     }
     return 0;
 }
@@ -206,15 +214,17 @@ static int SourcesOf(BuildGraph g, string[] files)
         var resolved = ResolveFileArg(g, file);
         if (resolved == null) continue;
 
-        var sources = g.GetSourcesOf(resolved);
+        var sources = g.GetSourcesOf(resolved).OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
         Console.WriteLine($"{Clr.Cyan}{file}{Clr.Reset}:");
         foreach (var s in sources)
         {
-            var clr = s.EndsWith(".h", StringComparison.OrdinalIgnoreCase)
-                    || s.EndsWith(".hpp", StringComparison.OrdinalIgnoreCase)
-                    || s.EndsWith(".hxx", StringComparison.OrdinalIgnoreCase)
-                    ? Clr.Magenta : Clr.Green;
-            Console.WriteLine($"  ← {clr}{g.ToAbsolute(s)}{Clr.Reset}");
+            var clr = g.Files.TryGetValue(s, out var f) ? f.Kind switch
+            {
+                FileKind.Source => Clr.Green,
+                FileKind.Output => Clr.Yellow,
+                _ => Clr.Dim
+            } : Clr.Dim;
+            Console.WriteLine($"  ← {clr}{s}{Clr.Reset}");
         }
     }
     return 0;
@@ -410,14 +420,14 @@ class BuildGraph
         return result;
     }
 
-    /// Given a source file, find all final outputs reachable through the graph.
+    /// Given a source file, find all files reachable downstream through the graph.
+    /// Returns every node on every forward path (intermediates included).
     public HashSet<string> GetOutputsOf(string sourcePath)
     {
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        WalkForward(sourcePath, visited, result);
-        result.Remove(sourcePath); // exclude self-edges
-        return result;
+        CollectForward(sourcePath, visited);
+        visited.Remove(sourcePath); // exclude self
+        return visited;
     }
 
     /// Find the nearest dev-visible outputs reachable from a source file.
@@ -442,36 +452,14 @@ class BuildGraph
         return result;
     }
 
-    /// Given an output file, find all source files that feed into it.
+    /// Given an output file, find all files reachable upstream through the graph.
+    /// Returns every node on every backward path (intermediates included).
     public HashSet<string> GetSourcesOf(string outputPath)
     {
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        WalkBackward(outputPath, visited, result);
-        return result;
-    }
-
-    void WalkForward(string filePath, HashSet<string> visited, HashSet<string> outputs)
-    {
-        if (!visited.Add(filePath)) return;
-
-        if (!FileToConsumers.TryGetValue(filePath, out var consumerIds))
-        {
-            // Leaf: no command consumes this file → it's a final output.
-            // Generated sources (.g.h, .g.cpp) have Source kind but ARE outputs
-            // of a command, so include them too.
-            if (Files.TryGetValue(filePath, out var f)
-                && (f.Kind != FileKind.Source || FileToProducer.ContainsKey(filePath)))
-                outputs.Add(filePath);
-            return;
-        }
-
-        foreach (var cmdId in consumerIds)
-        {
-            if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
-            foreach (var output in cmd.Outputs)
-                WalkForward(output, visited, outputs);
-        }
+        CollectBackward(outputPath, visited);
+        visited.Remove(outputPath); // exclude self
+        return visited;
     }
 
     /// Walk forward through commands, stopping at the first dev-visible file.
@@ -514,22 +502,6 @@ class BuildGraph
                     WalkToNearestVisibleEdges(output, tool, visited, edges);
             }
         }
-    }
-
-    void WalkBackward(string filePath, HashSet<string> visited, HashSet<string> sources)
-    {
-        if (!visited.Add(filePath)) return;
-
-        if (!FileToProducer.TryGetValue(filePath, out var producerId))
-        {
-            // Root: no command produces this file → it's a source
-            sources.Add(filePath);
-            return;
-        }
-
-        if (!Commands.TryGetValue(producerId, out var cmd)) return;
-        foreach (var input in cmd.Inputs)
-            WalkBackward(input, visited, sources);
     }
 
     /// Get all files reachable from the given file, both forward and backward.
