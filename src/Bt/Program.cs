@@ -72,7 +72,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Cyan}graph{Clr.Reset}              Emit Graphviz DOT dependency graph
           {Clr.Cyan}bins{Clr.Reset} <files>       Downstream dependency tree
           {Clr.Cyan}srcs{Clr.Reset} <files>       Upstream dependency tree
-          {Clr.Cyan}dirty{Clr.Reset} [files]      Build plan for changed files
+          {Clr.Cyan}dirty{Clr.Reset} [files]      Build plan (mtime-based, or explicit files)
           {Clr.Cyan}build{Clr.Reset} [files]      Build only what's dirty (-j N, --dry-run)
 
         {Clr.Yellow}Options:{Clr.Reset}
@@ -349,43 +349,38 @@ static void PrintTreeBackward(BuildGraph g, string filePath, string indent, bool
 
 static int Affected(BuildGraph g, string[] explicitFiles)
 {
-    // Gather changed files: explicit args, or fall back to git diff
-    var changedArgs = new List<string>(explicitFiles);
-    if (changedArgs.Count == 0)
+    List<CommandNode> plan;
+
+    if (explicitFiles.Length > 0)
     {
-        var gitFiles = GetGitChangedFiles(g.RootDir);
-        if (gitFiles == null) return 1; // error printed by helper
-        changedArgs.AddRange(gitFiles);
+        // Explicit files: resolve and walk forward
+        var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var arg in explicitFiles)
+        {
+            var r = ResolveFileArg(g, arg);
+            if (r != null) resolved.Add(r);
+        }
+        if (resolved.Count == 0)
+        {
+            Console.Error.WriteLine($"{Clr.Dim}No files found in graph.{Clr.Reset}");
+            return 0;
+        }
+        Console.Error.WriteLine($"{Clr.Dim}Explicit files ({resolved.Count}):{Clr.Reset}");
+        foreach (var f in resolved.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
+        Console.Error.WriteLine();
+        plan = g.GetAffectedCommands(resolved);
     }
-    if (changedArgs.Count == 0)
+    else
     {
-        Console.Error.WriteLine($"{Clr.Dim}No changed files.{Clr.Reset}");
-        return 0;
+        // Default: mtime-based dirty detection (make/ninja-style)
+        Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
+        plan = g.GetDirtyCommandsByMtime();
     }
 
-    // Resolve to graph paths
-    var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    foreach (var arg in changedArgs)
-    {
-        var r = ResolveFileArg(g, arg);
-        if (r != null) resolved.Add(r);
-    }
-    if (resolved.Count == 0)
-    {
-        Console.Error.WriteLine($"{Clr.Dim}No changed files found in graph.{Clr.Reset}");
-        return 0;
-    }
-
-    Console.Error.WriteLine($"{Clr.Dim}Changed files ({resolved.Count}):{Clr.Reset}");
-    foreach (var f in resolved.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
-        Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
-    Console.Error.WriteLine();
-
-    // Collect affected commands in topo order
-    var plan = g.GetAffectedCommands(resolved);
     if (plan.Count == 0)
     {
-        Console.Error.WriteLine($"{Clr.Dim}No commands affected.{Clr.Reset}");
+        Console.Error.WriteLine($"{Clr.Green}Everything up to date.{Clr.Reset}");
         return 0;
     }
 
@@ -406,36 +401,34 @@ static int Affected(BuildGraph g, string[] explicitFiles)
 
 static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryRun)
 {
-    // Reuse the same resolution logic as Affected
-    var changedArgs = new List<string>(explicitFiles);
-    if (changedArgs.Count == 0)
+    List<CommandNode> plan;
+
+    if (explicitFiles.Length > 0)
     {
-        var gitFiles = GetGitChangedFiles(g.RootDir);
-        if (gitFiles == null) return 1;
-        changedArgs.AddRange(gitFiles);
+        // Explicit files: resolve and walk forward
+        var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var arg in explicitFiles)
+        {
+            var r = ResolveFileArg(g, arg);
+            if (r != null) resolved.Add(r);
+        }
+        if (resolved.Count == 0)
+        {
+            Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
+            return 0;
+        }
+        plan = g.GetAffectedCommands(resolved);
     }
-    if (changedArgs.Count == 0)
+    else
     {
-        Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
-        return 0;
+        // Default: mtime-based dirty detection
+        Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
+        plan = g.GetDirtyCommandsByMtime();
     }
 
-    var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    foreach (var arg in changedArgs)
-    {
-        var r = ResolveFileArg(g, arg);
-        if (r != null) resolved.Add(r);
-    }
-    if (resolved.Count == 0)
-    {
-        Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
-        return 0;
-    }
-
-    var plan = g.GetAffectedCommands(resolved);
     if (plan.Count == 0)
     {
-        Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
+        Console.Error.WriteLine($"{Clr.Green}Everything up to date.{Clr.Reset}");
         return 0;
     }
 
@@ -570,69 +563,6 @@ static (int exitCode, string output) ExecuteCommand(CommandNode cmd)
     catch (Exception ex)
     {
         return (1, ex.Message);
-    }
-}
-
-static List<string>? GetGitChangedFiles(string rootDir)
-{
-    try
-    {
-        var psi = new System.Diagnostics.ProcessStartInfo("git", "rev-parse --is-inside-work-tree")
-        {
-            WorkingDirectory = rootDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        using var check = System.Diagnostics.Process.Start(psi);
-        check?.WaitForExit();
-        if (check == null || check.ExitCode != 0)
-        {
-            Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} not a git repository. Pass files explicitly: {Clr.Dim}bt dirty file1.cpp file2.h{Clr.Reset}");
-            return null;
-        }
-
-        // Staged changes (vs HEAD)
-        var psi1 = new System.Diagnostics.ProcessStartInfo("git", "diff --name-only HEAD")
-        {
-            WorkingDirectory = rootDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        using var proc = System.Diagnostics.Process.Start(psi1);
-        if (proc == null) { Console.Error.WriteLine($"{Clr.Red}Failed to start git{Clr.Reset}"); return null; }
-        var output = proc.StandardOutput.ReadToEnd();
-        proc.WaitForExit();
-
-        // Also get unstaged changes (untracked won't be in graph anyway)
-        var psi2 = new System.Diagnostics.ProcessStartInfo("git", "diff --name-only")
-        {
-            WorkingDirectory = rootDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        using var proc2 = System.Diagnostics.Process.Start(psi2);
-        if (proc2 != null)
-        {
-            output += proc2.StandardOutput.ReadToEnd();
-            proc2.WaitForExit();
-        }
-
-        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-    catch (System.ComponentModel.Win32Exception)
-    {
-        Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} git not found. Pass files explicitly: {Clr.Dim}bt dirty file1.cpp file2.h{Clr.Reset}");
-        return null;
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"{Clr.Red}git error:{Clr.Reset} {ex.Message}");
-        return null;
     }
 }
 
@@ -1024,6 +954,107 @@ class BuildGraph
                 deduped.Add(cmd);
         }
         return deduped;
+    }
+
+    /// Find dirty commands by comparing file timestamps (make/ninja-style).
+    /// A command is dirty if any input is newer than any output, or if any
+    /// output is missing. Dirty propagates forward through the graph.
+    /// Returns commands in topological order, skipping synthetic (#include).
+    public List<CommandNode> GetDirtyCommandsByMtime()
+    {
+        // Topo-sort ALL real commands first (Kahn's algorithm)
+        var realCmds = Commands.Values.Where(c => !c.Tool.StartsWith("#")).ToList();
+        var inDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var dependents = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cmd in realCmds)
+        {
+            inDegree.TryAdd(cmd.Id, 0);
+            dependents.TryAdd(cmd.Id, []);
+        }
+        var cmdById = realCmds.ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
+        foreach (var cmd in realCmds)
+            foreach (var input in cmd.Inputs)
+                if (FileToProducer.TryGetValue(input, out var depId) && cmdById.ContainsKey(depId))
+                {
+                    inDegree[cmd.Id] = inDegree.GetValueOrDefault(cmd.Id) + 1;
+                    dependents[depId].Add(cmd.Id);
+                }
+
+        var queue = new Queue<string>(inDegree.Where(kv => kv.Value == 0).Select(kv => kv.Key).OrderBy(k => k));
+        var topoOrder = new List<CommandNode>();
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            if (cmdById.TryGetValue(id, out var cmd)) topoOrder.Add(cmd);
+            foreach (var dep in dependents.GetValueOrDefault(id, []).OrderBy(d => d))
+                if (--inDegree[dep] == 0) queue.Enqueue(dep);
+        }
+
+        // Walk topo order, check mtime. Dirty propagates forward.
+        var dirtyOutputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<CommandNode>();
+        // Dedup by output set (same issue as GetAffectedCommands)
+        var seenOutputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var cmd in topoOrder)
+        {
+            var outputKey = string.Join("|", cmd.Outputs.OrderBy(o => o, StringComparer.OrdinalIgnoreCase));
+            if (!seenOutputs.Add(outputKey)) continue;
+
+            bool dirty = false;
+
+            // If any input was produced by a dirty command, we're dirty too
+            if (cmd.Inputs.Any(i => dirtyOutputs.Contains(i)))
+                dirty = true;
+
+            if (!dirty)
+            {
+                // Check mtime: max(input mtime) > min(output mtime), or output missing.
+                // For inputs produced by synthetic commands (#include), also check
+                // the transitive sources (headers) so a touched .h triggers CL.
+                var maxInputTime = DateTime.MinValue;
+                var allInputs = new HashSet<string>(cmd.Inputs, StringComparer.OrdinalIgnoreCase);
+                foreach (var input in cmd.Inputs)
+                    CollectSyntheticSources(input, allInputs);
+
+                foreach (var input in allInputs)
+                {
+                    var absPath = ToAbsolute(input);
+                    if (File.Exists(absPath))
+                    {
+                        var t = File.GetLastWriteTimeUtc(absPath);
+                        if (t > maxInputTime) maxInputTime = t;
+                    }
+                }
+
+                foreach (var output in cmd.Outputs)
+                {
+                    var absPath = ToAbsolute(output);
+                    if (!File.Exists(absPath)) { dirty = true; break; }
+                    var t = File.GetLastWriteTimeUtc(absPath);
+                    if (maxInputTime > t) { dirty = true; break; }
+                }
+            }
+
+            if (dirty)
+            {
+                result.Add(cmd);
+                foreach (var o in cmd.Outputs) dirtyOutputs.Add(o);
+            }
+        }
+
+        return result;
+    }
+
+    /// Walk backward through synthetic (#include) commands to collect transitive header inputs.
+    void CollectSyntheticSources(string file, HashSet<string> collected)
+    {
+        if (!FileToProducer.TryGetValue(file, out var producerId)) return;
+        if (!Commands.TryGetValue(producerId, out var producer)) return;
+        if (!producer.Tool.StartsWith("#")) return; // only follow synthetic edges
+        foreach (var input in producer.Inputs)
+            if (collected.Add(input))
+                CollectSyntheticSources(input, collected);
     }
 
     // --- Factory ---

@@ -28,8 +28,10 @@ msbuild MySolution.sln -bl
 # Explore
 bt bins MyHeader.h            # tree of everything downstream
 bt srcs MyApp.exe             # tree of everything upstream
-bt dirty MyFile.cpp           # build plan for changed file
-bt dirty                      # build plan from git diff
+bt dirty                      # build plan from file timestamps (mtime)
+bt dirty MyFile.cpp           # build plan for specific file(s)
+bt build                      # rebuild only what's stale
+bt build -n                   # dry-run — show commands without executing
 bt graph -p MyProject         # DOT graph filtered to one project
 bt graph -f MyFile.cpp        # DOT subgraph around one file
 ```
@@ -43,7 +45,8 @@ unless the binlog changes.
 |---------|-------------|
 | `bt bins <files>` | Downstream dependency tree — what rebuilds when `<file>` changes |
 | `bt srcs <files>` | Upstream dependency tree — what sources feed into `<file>` |
-| `bt dirty [files]` | Topo-sorted build plan for changed files (default: `git diff`) |
+| `bt dirty [files]` | Topo-sorted build plan (default: mtime-based; explicit files override) |
+| `bt build [files]` | Execute dirty commands in parallel waves (`-j N`, `--dry-run`) |
 | `bt graph` | Emit full Graphviz DOT graph (pipe to `dot`, `d2`, etc.) |
 
 ### Graph filters
@@ -60,6 +63,8 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 |--------|---------|-------------|
 | `--binlog <path>` | `msbuild.binlog` | Path to binary log (also tries `msbuild_debug.binlog`, `msbuild_release.binlog`) |
 | `--color <mode>` | `auto` | ANSI colours: `auto`, `always`, `never` |
+| `-j <N>` | CPU cores | Max parallel commands for `build` |
+| `-n, --dry-run` | — | Print commands without executing (`build` only) |
 
 ## What's in the graph
 
@@ -87,7 +92,9 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 
 3. **Cache** — The graph serializes to `.bt/graph.json`. Invalidated when the binlog's timestamp changes.
 
-4. **Query** — `bins`/`srcs` walk the graph forward/backward, printing a tree. `dirty` computes a topo-sorted build plan. `graph` emits DOT for visualization.
+4. **Query** — `bins`/`srcs` walk the graph forward/backward, printing a tree. `dirty` computes a topo-sorted build plan using file timestamps (like `make`/`ninja`). `graph` emits DOT for visualization.
+
+5. **Build** — `build` executes dirty commands in parallel waves, invoking `cl.exe`, `link.exe`, etc. directly — no MSBuild overhead.
 
 ## Requirements
 
