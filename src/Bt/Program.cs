@@ -440,15 +440,18 @@ static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryR
         return 0;
     }
 
-    Console.Error.WriteLine($"{Clr.Bold}Build plan: {plan.Count} commands, {maxJobs} parallel jobs{Clr.Reset}");
+    var effectiveJobs = Math.Min(plan.Count, maxJobs);
+    Console.Error.WriteLine($"{Clr.Bold}Build plan: {plan.Count} command{(plan.Count == 1 ? "" : "s")}, {effectiveJobs} parallel{Clr.Reset}");
     Console.Error.WriteLine();
 
     if (dryRun)
     {
         foreach (var cmd in plan)
         {
+            // Collapse newlines in command line (link.exe has multi-line .obj args)
+            var cmdLine = cmd.CommandLine.ReplaceLineEndings(" ").Trim();
             Console.Error.WriteLine($"{Clr.Cyan}[{cmd.Tool}]{Clr.Reset} {Clr.Dim}{cmd.Project}{Clr.Reset}");
-            Console.WriteLine(cmd.CommandLine);
+            Console.WriteLine(cmdLine);
             Console.Error.WriteLine();
         }
         return 0;
