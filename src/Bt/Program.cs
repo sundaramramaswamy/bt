@@ -208,11 +208,11 @@ enum FileKind { Source, Intermediate, Output }
 static class FileKinds
 {
     static readonly HashSet<string> SourceExts = new(StringComparer.OrdinalIgnoreCase)
-        { ".cpp", ".cc", ".cxx", ".c", ".cs", ".idl", ".xaml", ".rc", ".res" };
+        { ".cpp", ".cc", ".cxx", ".c", ".cs", ".idl", ".xaml", ".rc", ".res", ".appxmanifest" };
     static readonly HashSet<string> HeaderExts = new(StringComparer.OrdinalIgnoreCase)
         { ".h", ".hpp", ".hxx" };
     static readonly HashSet<string> OutputExts = new(StringComparer.OrdinalIgnoreCase)
-        { ".exe", ".dll", ".lib", ".winmd", ".xbf", ".obj", ".pri" };
+        { ".exe", ".dll", ".lib", ".winmd", ".xbf", ".obj", ".pri", ".appxrecipe" };
     static readonly HashSet<string> IntermediateExts = new(StringComparer.OrdinalIgnoreCase)
         { ".pch", ".res" };
 
@@ -715,6 +715,41 @@ class BuildGraph
             graph.Commands[cmdId] = cmd;
             graph.Files.TryAdd(priRel, new FileNode(priRel, FileKinds.Classify(priRel)));
             graph.FileToProducer[priRel] = cmdId;
+        }
+
+        // AppxManifest: WinAppSdkGenerateAppxManifest
+        // Package.appxmanifest → AppxManifest.xml
+        foreach (var manTask in build.FindChildrenRecursive<MSTask>(
+            t => t.Name == "WinAppSdkGenerateAppxManifest"))
+        {
+            var projNode5 = manTask.GetNearestParent<Project>();
+            var proj5 = projNode5?.Name ?? "unknown";
+            var projDir5 = projNode5?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(projNode5.ProjectFile)) ?? ""
+                : "";
+            var pf5 = manTask.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            if (pf5 == null) continue;
+
+            var inputItems = pf5.FindChildrenRecursive<Parameter>(p => p.Name == "AppxManifestInput")
+                .FirstOrDefault()?.Children.OfType<Item>()
+                .Select(i => graph.ToRelative(ResolveAbsolute(projDir5, i.Text)))
+                .ToList() ?? [];
+            var outFile = pf5.FindChildrenRecursive<Property>(p => p.Name == "AppxManifestOutput")
+                .FirstOrDefault()?.Value;
+            if (outFile == null) continue;
+
+            var outRel = graph.ToRelative(ResolveAbsolute(projDir5, outFile));
+            var target5 = manTask.GetNearestParent<Target>()?.Name ?? "unknown";
+            var cmdId = $"AppxManifest#{cmdIndex++}:{proj5}/{target5}";
+            var cmd = new CommandNode(cmdId, "AppxManifest", proj5, target5, inputItems, [outRel]);
+            graph.Commands[cmdId] = cmd;
+            foreach (var inp in inputItems)
+            {
+                graph.Files.TryAdd(inp, new FileNode(inp, FileKinds.Classify(inp)));
+                graph.AddConsumer(inp, cmdId);
+            }
+            graph.Files.TryAdd(outRel, new FileNode(outRel, FileKind.Output));
+            graph.FileToProducer[outRel] = cmdId;
         }
 
         return graph;
