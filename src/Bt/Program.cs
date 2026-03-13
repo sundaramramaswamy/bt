@@ -871,12 +871,26 @@ class BuildGraph
     }
 
     /// Parse CL.read.1.tlog files to wire precise header → source dependencies.
+    /// Creates synthetic #include commands: .h → [#include] → .cpp
+    /// so the graph reads .h → .cpp → .obj (not .h → .obj directly).
     /// Returns true if at least one tlog was found and parsed.
     static bool WireTlogHeaders(BuildGraph graph,
         Dictionary<string, string> objDirsByProject,
         Dictionary<string, string> clCmdByAbsSource)
     {
         bool foundAny = false;
+        int inclIndex = 0;
+
+        // Build reverse map: absSource → relative source path
+        var absToRel = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (abs, _) in clCmdByAbsSource)
+        {
+            var rel = graph.ToRelative(abs);
+            absToRel[abs] = rel;
+        }
+
+        // Track which (header, source) pairs we've already wired to avoid duplication
+        var wired = new HashSet<(string header, string source)>();
 
         foreach (var (proj, absObjDir) in objDirsByProject)
         {
@@ -896,34 +910,37 @@ class BuildGraph
                 if (!File.Exists(readTlog)) continue;
                 foundAny = true;
 
-                // Parse: lines starting with ^ are source files (absolute, uppercase).
-                // Subsequent lines are files that source reads (includes).
-                string? currentCmdId = null;
+                string? currentSourceRel = null;
                 foreach (var line in File.ReadLines(readTlog))
                 {
                     if (line.StartsWith('^'))
                     {
-                        // Source file — look up the CL command for it
                         var absSource = line[1..];
-                        clCmdByAbsSource.TryGetValue(absSource, out currentCmdId);
+                        currentSourceRel = absToRel.GetValueOrDefault(absSource);
                         continue;
                     }
 
-                    if (currentCmdId == null) continue;
+                    if (currentSourceRel == null) continue;
 
                     // Only track headers under the solution root
                     if (!line.StartsWith(graph.RootDir, StringComparison.OrdinalIgnoreCase)) continue;
 
                     var headerRel = graph.ToRelative(line);
-                    // Skip non-header files (e.g., .pch, .nls) and the source itself
                     var ext = Path.GetExtension(headerRel);
                     if (!IsHeader(ext) && !IsGeneratedSource(ext)) continue;
 
+                    // Deduplicate: same header→source pair from multiple tlog entries
+                    if (!wired.Add((headerRel, currentSourceRel))) continue;
+
                     graph.Files.TryAdd(headerRel, new FileNode(headerRel, FileKinds.Classify(headerRel)));
-                    graph.AddConsumer(headerRel, currentCmdId);
-                    if (graph.Commands.TryGetValue(currentCmdId, out var cmd)
-                        && !cmd.Inputs.Contains(headerRel, StringComparer.OrdinalIgnoreCase))
-                        cmd.Inputs.Add(headerRel);
+
+                    // Create synthetic #include command: header → source
+                    var cmdId = $"#include#{inclIndex++}";
+                    var cmd = new CommandNode(cmdId, "#include", "", "", [headerRel], [currentSourceRel]);
+                    graph.Commands[cmdId] = cmd;
+                    graph.AddConsumer(headerRel, cmdId);
+                    // Don't set FileToProducer for the source — it's a real source file,
+                    // not generated. Multiple headers can feed the same source.
                 }
             }
         }
