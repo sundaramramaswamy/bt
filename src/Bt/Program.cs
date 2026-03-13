@@ -24,7 +24,7 @@ graphCmd.Add(graphFileOption);
 graphCmd.Add(graphProjectOption);
 
 var outputsFilesArg = new Argument<string[]>("files") { Description = "Source files to query", Arity = ArgumentArity.OneOrMore };
-var outputsOfCmd = new Command("outs", "List all downstream files reachable from <file>");
+var outputsOfCmd = new Command("bins", "Downstream dependency tree from <file>");
 outputsOfCmd.Add(outputsFilesArg);
 
 var sourcesFilesArg = new Argument<string[]>("files") { Description = "Output files to query", Arity = ArgumentArity.OneOrMore };
@@ -33,7 +33,7 @@ sourcesOfCmd.Add(sourcesFilesArg);
 
 var affectedFilesArg = new Argument<string[]>("files") { Description = "Changed files", Arity = ArgumentArity.ZeroOrMore };
 var affectedGitOption = new Option<bool>("--git") { Description = "Detect changed files from git (unstaged + staged)" };
-var affectedCmd = new Command("affected", "List commands to re-run for changed files");
+var affectedCmd = new Command("dirty", "Build plan for changed files");
 affectedCmd.Add(affectedFilesArg);
 affectedCmd.Add(affectedGitOption);
 
@@ -50,7 +50,7 @@ root.Add(affectedCmd);
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
-    if (args.Length == 0 || !args.Any(a => a is "graph" or "outs" or "srcs" or "affected"))
+    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty"))
     {
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
@@ -61,9 +61,9 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
 
         {Clr.Yellow}Commands:{Clr.Reset}
           {Clr.Cyan}graph{Clr.Reset}              Emit Graphviz DOT dependency graph
-          {Clr.Cyan}outs{Clr.Reset} <files>       Downstream dependency tree
+          {Clr.Cyan}bins{Clr.Reset} <files>       Downstream dependency tree
           {Clr.Cyan}srcs{Clr.Reset} <files>       Upstream dependency tree
-          {Clr.Cyan}affected{Clr.Reset} [files]   Build plan for changed files (topo-sorted commands)
+          {Clr.Cyan}dirty{Clr.Reset} [files]      Build plan for changed files
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
@@ -76,10 +76,10 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
         {Clr.Yellow}Examples:{Clr.Reset}
           {Clr.Dim}bt graph | dot -Tsvg -o build.svg{Clr.Reset}
           {Clr.Dim}bt graph -f TestDataItem.h{Clr.Reset}
-          {Clr.Dim}bt outs TestDataItem.h{Clr.Reset}
+          {Clr.Dim}bt bins TestDataItem.h{Clr.Reset}
           {Clr.Dim}bt srcs XaBench.exe{Clr.Reset}
-          {Clr.Dim}bt affected --git{Clr.Reset}
-          {Clr.Dim}bt affected src/Foo.cpp src/Bar.h{Clr.Reset}
+          {Clr.Dim}bt dirty --git{Clr.Reset}
+          {Clr.Dim}bt dirty src/Foo.cpp src/Bar.h{Clr.Reset}
         """);
         return 0;
     }

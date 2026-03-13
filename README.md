@@ -4,7 +4,7 @@
 Parses a binary log, builds a file-level dependency graph, and lets you query it.
 
 ```
-bt outs TestDataItem.h        # what gets rebuilt when this header changes?
+bt bins TestDataItem.h        # what gets rebuilt when this header changes?
 bt srcs XaBench.exe           # what sources feed into this binary?
 bt graph | dot -Tsvg -o g.svg # full Graphviz DOT graph
 ```
@@ -26,8 +26,10 @@ edge in the graph. Tlog files add precise `#include` tracking per source file.
 msbuild MySolution.sln -bl
 
 # Explore
-bt outs MyHeader.h            # tree of everything downstream
+bt bins MyHeader.h            # tree of everything downstream
 bt srcs MyApp.exe             # tree of everything upstream
+bt dirty MyFile.cpp           # build plan for changed file
+bt dirty --git                # build plan from git diff
 bt graph -p MyProject         # DOT graph filtered to one project
 bt graph -f MyFile.cpp        # DOT subgraph around one file
 ```
@@ -39,8 +41,9 @@ unless the binlog changes.
 
 | Command | Description |
 |---------|-------------|
-| `bt outs <files>` | Downstream dependency tree — what rebuilds when `<file>` changes |
+| `bt bins <files>` | Downstream dependency tree — what rebuilds when `<file>` changes |
 | `bt srcs <files>` | Upstream dependency tree — what sources feed into `<file>` |
+| `bt dirty [files]` | Topo-sorted build plan for changed files (`--git` for auto-detect) |
 | `bt graph` | Emit full Graphviz DOT graph (pipe to `dot`, `d2`, etc.) |
 
 ### Graph filters
@@ -84,7 +87,7 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 
 3. **Cache** — The graph serializes to `.bt/graph.json`. Invalidated when the binlog's timestamp changes.
 
-4. **Query** — `outs`/`srcs` walk the graph forward/backward, printing a tree. `graph` emits DOT for visualization.
+4. **Query** — `bins`/`srcs` walk the graph forward/backward, printing a tree. `dirty` computes a topo-sorted build plan. `graph` emits DOT for visualization.
 
 ## Requirements
 
