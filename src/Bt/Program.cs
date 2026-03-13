@@ -73,11 +73,11 @@ static int ShowGraph(BuildGraph g)
     // Intermediates (.obj, .pch) are collapsed — edges skip through them.
     var visible = g.Files.Values.Where(f => FileKinds.IsDevVisible(f.Kind)).ToList();
 
-    // Walk forward from each source to find which visible outputs it reaches,
-    // and walk backward from each output to find which visible sources feed it.
+    // Walk forward from each source to its nearest visible outputs.
+    // Only one "hop" through intermediate nodes — no transitive shortcuts.
     var edges = new HashSet<(string src, string output)>();
     foreach (var src in visible.Where(f => f.Kind == FileKind.Source))
-        foreach (var output in g.GetOutputsOf(src.Path))
+        foreach (var output in g.GetNearestVisibleOutputsOf(src.Path))
             edges.Add((src.Path, output));
 
     Console.WriteLine("digraph build {");
@@ -258,6 +258,18 @@ class BuildGraph
         return result;
     }
 
+    /// Find the nearest dev-visible outputs reachable from a source file.
+    /// Walks through intermediate nodes but stops at the first visible file.
+    /// Used for the DOT graph to avoid transitive shortcut edges.
+    public HashSet<string> GetNearestVisibleOutputsOf(string sourcePath)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        visited.Add(sourcePath);
+        WalkToNearestVisible(sourcePath, visited, result);
+        return result;
+    }
+
     /// Given an output file, find all source files that feed into it.
     public HashSet<string> GetSourcesOf(string outputPath)
     {
@@ -287,6 +299,26 @@ class BuildGraph
             if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
             foreach (var output in cmd.Outputs)
                 WalkForward(output, visited, outputs);
+        }
+    }
+
+    /// Walk forward through commands, stopping at the first dev-visible file.
+    /// Intermediate files (.obj, .pch) are walked through transparently.
+    void WalkToNearestVisible(string filePath, HashSet<string> visited, HashSet<string> outputs)
+    {
+        if (!FileToConsumers.TryGetValue(filePath, out var consumerIds)) return;
+
+        foreach (var cmdId in consumerIds)
+        {
+            if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+            foreach (var output in cmd.Outputs)
+            {
+                if (!visited.Add(output)) continue;
+                if (Files.TryGetValue(output, out var f) && FileKinds.IsDevVisible(f.Kind))
+                    outputs.Add(output);     // visible → stop here
+                else
+                    WalkToNearestVisible(output, visited, outputs); // intermediate → keep walking
+            }
         }
     }
 
