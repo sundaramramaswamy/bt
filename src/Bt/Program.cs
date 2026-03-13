@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text.Json;
 using Microsoft.Build.Logging.StructuredLogger;
 using MSTask = Microsoft.Build.Logging.StructuredLogger.Task;
 
@@ -254,9 +255,44 @@ static BuildGraph LoadGraph(string binlogPath)
         Console.Error.WriteLine($"Run a full build with: {Clr.Dim}msbuild /bl{Clr.Reset}");
         Environment.Exit(1);
     }
+
+    var binlogDir = Path.GetDirectoryName(Path.GetFullPath(binlogPath)) ?? ".";
+    var cacheDir = Path.Combine(binlogDir, ".bt");
+    var cacheName = Path.GetFileNameWithoutExtension(binlogPath) + ".graph.json";
+    var cachePath = Path.Combine(cacheDir, cacheName);
+    var binlogStamp = File.GetLastWriteTimeUtc(binlogPath);
+
+    // Try loading from cache
+    if (File.Exists(cachePath))
+    {
+        try
+        {
+            var cached = GraphCache.Load(cachePath);
+            if (cached != null && cached.BinlogTimestamp == binlogStamp.Ticks)
+            {
+                Console.Error.WriteLine($"{Clr.Dim}cache:{Clr.Reset} {cachePath}");
+                return cached.ToGraph();
+            }
+            Console.Error.WriteLine($"{Clr.Dim}cache stale, rebuilding{Clr.Reset}");
+        }
+        catch { Console.Error.WriteLine($"{Clr.Dim}cache corrupt, rebuilding{Clr.Reset}"); }
+    }
+
+    // Parse binlog and build graph
     Console.Error.WriteLine($"{Clr.Dim}binlog:{Clr.Reset} {binlogPath}");
     var build = BinaryLog.ReadBuild(binlogPath);
-    return BuildGraph.FromBinlog(build);
+    var graph = BuildGraph.FromBinlog(build);
+
+    // Save cache
+    try
+    {
+        Directory.CreateDirectory(cacheDir);
+        GraphCache.Save(cachePath, graph, binlogStamp);
+        Console.Error.WriteLine($"{Clr.Dim}cached:{Clr.Reset} {cachePath}");
+    }
+    catch (Exception ex) { Console.Error.WriteLine($"{Clr.Dim}cache write failed: {ex.Message}{Clr.Reset}"); }
+
+    return graph;
 }
 
 // ============================================================
@@ -1184,4 +1220,75 @@ static class Clr
     public static string Magenta => _enabled ? "\x1b[35m" : "";
     public static string Cyan    => _enabled ? "\x1b[36m" : "";
     public static string Dim     => _enabled ? "\x1b[2m"  : "";
+}
+
+// ============================================================
+// Graph cache — JSON serialization with staleness detection
+// ============================================================
+
+/// Serializable representation of the build graph.
+class GraphCache
+{
+    public long BinlogTimestamp { get; set; }
+    public string RootDir { get; set; } = "";
+    public List<CachedFile> Files { get; set; } = [];
+    public List<CachedCommand> Commands { get; set; } = [];
+
+    static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented = false,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
+    public static void Save(string path, BuildGraph graph, DateTime binlogStamp)
+    {
+        var cache = new GraphCache
+        {
+            BinlogTimestamp = binlogStamp.Ticks,
+            RootDir = graph.RootDir,
+            Files = graph.Files.Values.Select(f => new CachedFile { Path = f.Path, Kind = (int)f.Kind }).ToList(),
+            Commands = graph.Commands.Values.Select(c => new CachedCommand
+            {
+                Id = c.Id, Tool = c.Tool, Project = c.Project, Target = c.Target,
+                Inputs = c.Inputs, Outputs = c.Outputs
+            }).ToList()
+        };
+        File.WriteAllText(path, JsonSerializer.Serialize(cache, JsonOpts));
+    }
+
+    public static GraphCache? Load(string path)
+        => JsonSerializer.Deserialize<GraphCache>(File.ReadAllText(path), JsonOpts);
+
+    public BuildGraph ToGraph()
+    {
+        var graph = new BuildGraph { RootDir = RootDir };
+        foreach (var f in Files)
+            graph.Files.TryAdd(f.Path, new FileNode(f.Path, (FileKind)f.Kind));
+        foreach (var c in Commands)
+        {
+            var cmd = new CommandNode(c.Id, c.Tool, c.Project, c.Target, c.Inputs, c.Outputs);
+            graph.Commands[cmd.Id] = cmd;
+            foreach (var input in cmd.Inputs)
+                graph.AddConsumer(input, cmd.Id);
+            foreach (var output in cmd.Outputs)
+                graph.FileToProducer[output] = cmd.Id;
+        }
+        return graph;
+    }
+}
+
+class CachedFile
+{
+    public string Path { get; set; } = "";
+    public int Kind { get; set; }
+}
+
+class CachedCommand
+{
+    public string Id { get; set; } = "";
+    public string Tool { get; set; } = "";
+    public string Project { get; set; } = "";
+    public string Target { get; set; } = "";
+    public List<string> Inputs { get; set; } = [];
+    public List<string> Outputs { get; set; } = [];
 }

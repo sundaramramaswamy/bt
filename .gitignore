@@ -1,3 +1,4 @@
 *.binlog
+.bt/
 tmp/
 copilot-session-*.md
