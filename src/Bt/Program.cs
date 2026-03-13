@@ -293,7 +293,7 @@ static string FileClr(BuildGraph g, string path) =>
         _ => Clr.Dim
     } : Clr.Dim;
 
-static void PrintTreeForward(BuildGraph g, string filePath, string indent, bool last, HashSet<string> seen)
+static void PrintTreeForward(BuildGraph g, string filePath, string indent, bool last, HashSet<string> seen, HashSet<string>? dirtyIds = null)
 {
     if (!g.FileToConsumers.TryGetValue(filePath, out var consumerIds)) return;
 
@@ -302,9 +302,10 @@ static void PrintTreeForward(BuildGraph g, string filePath, string indent, bool 
     var childSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     foreach (var cmdId in consumerIds)
         if (g.Commands.TryGetValue(cmdId, out var cmd))
-            foreach (var o in cmd.Outputs)
-                if (childSeen.Add(o))
-                    children.Add((cmd.Tool, o));
+            if (dirtyIds == null || dirtyIds.Contains(cmdId))
+                foreach (var o in cmd.Outputs)
+                    if (childSeen.Add(o))
+                        children.Add((cmd.Tool, o));
     children.Sort((a, b) => string.Compare(a.output, b.output, StringComparison.OrdinalIgnoreCase));
 
     for (int i = 0; i < children.Count; i++)
@@ -320,7 +321,7 @@ static void PrintTreeForward(BuildGraph g, string filePath, string indent, bool 
             continue;
         }
         Console.WriteLine($"{indent}{branch}{Clr.Dim}[{tool}]{Clr.Reset} {FileClr(g, output)}{output}{Clr.Reset}");
-        PrintTreeForward(g, output, indent + cont, isLast, seen);
+        PrintTreeForward(g, output, indent + cont, isLast, seen, dirtyIds);
     }
 }
 
@@ -384,12 +385,18 @@ static int Affected(BuildGraph g, string[] explicitFiles)
             return 0;
         }
 
-        // Print a tree per dirty source, reusing the bins tree walker
+        // Print a tree per dirty source, filtered to only dirty commands.
+        // Also include synthetic (#include) commands that bridge to dirty commands.
+        var dirtyIds = new HashSet<string>(plan.Select(c => c.Id), StringComparer.OrdinalIgnoreCase);
+        foreach (var cmd in g.Commands.Values)
+            if (cmd.Tool.StartsWith("#") && cmd.Outputs.Any(o =>
+                g.FileToConsumers.TryGetValue(o, out var cids) && cids.Any(dirtyIds.Contains)))
+                dirtyIds.Add(cmd.Id);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (src, _) in dirtySources.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
         {
             Console.WriteLine($"{Clr.Red}{src}{Clr.Reset}");
-            PrintTreeForward(g, src, "", true, seen);
+            PrintTreeForward(g, src, "", true, seen, dirtyIds);
         }
         Console.Error.WriteLine();
         Console.Error.WriteLine($"{Clr.Yellow}{plan.Count} command{(plan.Count == 1 ? "" : "s")} to run.{Clr.Reset}");
