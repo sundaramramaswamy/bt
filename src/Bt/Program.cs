@@ -375,7 +375,25 @@ static int Affected(BuildGraph g, string[] explicitFiles)
     {
         // Default: mtime-based dirty detection (make/ninja-style)
         Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
-        plan = g.GetDirtyCommandsByMtime();
+        var (mtimePlan, dirtySources) = g.GetDirtyCommandsByMtime();
+        plan = mtimePlan;
+
+        if (plan.Count == 0)
+        {
+            Console.Error.WriteLine($"{Clr.Green}Everything up to date.{Clr.Reset}");
+            return 0;
+        }
+
+        // Print a tree per dirty source, reusing the bins tree walker
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (src, _) in dirtySources.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"{Clr.Red}{src}{Clr.Reset}");
+            PrintTreeForward(g, src, "", true, seen);
+        }
+        Console.Error.WriteLine();
+        Console.Error.WriteLine($"{Clr.Yellow}{plan.Count} command{(plan.Count == 1 ? "" : "s")} to run.{Clr.Reset}");
+        return 0;
     }
 
     if (plan.Count == 0)
@@ -423,7 +441,7 @@ static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryR
     {
         // Default: mtime-based dirty detection
         Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
-        plan = g.GetDirtyCommandsByMtime();
+        plan = g.GetDirtyCommandsByMtime().Plan;
     }
 
     if (plan.Count == 0)
@@ -962,8 +980,9 @@ class BuildGraph
     /// Find dirty commands by comparing file timestamps (make/ninja-style).
     /// A command is dirty if any input is newer than any output, or if any
     /// output is missing. Dirty propagates forward through the graph.
-    /// Returns commands in topological order, skipping synthetic (#include).
-    public List<CommandNode> GetDirtyCommandsByMtime()
+    /// Returns commands in topological order, skipping synthetic (#include),
+    /// along with a map from each dirty source file to the commands it triggered.
+    public (List<CommandNode> Plan, Dictionary<string, List<CommandNode>> DirtySources) GetDirtyCommandsByMtime()
     {
         // Topo-sort ALL real commands first (Kahn's algorithm)
         var realCmds = Commands.Values.Where(c => !c.Tool.StartsWith("#")).ToList();
@@ -996,8 +1015,9 @@ class BuildGraph
         // Walk topo order, check mtime. Dirty propagates forward.
         var dirtyOutputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<CommandNode>();
-        // Dedup by output set (same issue as GetAffectedCommands)
         var seenOutputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Track: which source files triggered each command
+        var cmdTriggers = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var cmd in topoOrder)
         {
@@ -1005,48 +1025,66 @@ class BuildGraph
             if (!seenOutputs.Add(outputKey)) continue;
 
             bool dirty = false;
+            var triggers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // If any input was produced by a dirty command, we're dirty too
-            if (cmd.Inputs.Any(i => dirtyOutputs.Contains(i)))
-                dirty = true;
+            // If any input was produced by a dirty command, we're dirty too (propagation)
+            foreach (var i in cmd.Inputs)
+                if (dirtyOutputs.Contains(i) && FileToProducer.TryGetValue(i, out var pid) && cmdTriggers.ContainsKey(pid))
+                {
+                    dirty = true;
+                    triggers.UnionWith(cmdTriggers[pid]);
+                }
 
             if (!dirty)
             {
                 // Check mtime: max(input mtime) > min(output mtime), or output missing.
                 // For inputs produced by synthetic commands (#include), also check
                 // the transitive sources (headers) so a touched .h triggers CL.
-                var maxInputTime = DateTime.MinValue;
                 var allInputs = new HashSet<string>(cmd.Inputs, StringComparer.OrdinalIgnoreCase);
                 foreach (var input in cmd.Inputs)
                     CollectSyntheticSources(input, allInputs);
 
+                // Find the newest input and which file it is
+                DateTime maxInputTime = DateTime.MinValue;
+                string? newestInput = null;
                 foreach (var input in allInputs)
                 {
                     var absPath = ToAbsolute(input);
                     if (File.Exists(absPath))
                     {
                         var t = File.GetLastWriteTimeUtc(absPath);
-                        if (t > maxInputTime) maxInputTime = t;
+                        if (t > maxInputTime) { maxInputTime = t; newestInput = input; }
                     }
                 }
 
                 foreach (var output in cmd.Outputs)
                 {
                     var absPath = ToAbsolute(output);
-                    if (!File.Exists(absPath)) { dirty = true; break; }
+                    if (!File.Exists(absPath)) { dirty = true; triggers.Add(output + " (missing)"); break; }
                     var t = File.GetLastWriteTimeUtc(absPath);
-                    if (maxInputTime > t) { dirty = true; break; }
+                    if (maxInputTime > t) { dirty = true; if (newestInput != null) triggers.Add(newestInput); break; }
                 }
             }
 
             if (dirty)
             {
                 result.Add(cmd);
+                cmdTriggers[cmd.Id] = triggers;
                 foreach (var o in cmd.Outputs) dirtyOutputs.Add(o);
             }
         }
 
-        return result;
+        // Invert: group by dirty source → commands it affects
+        var dirtySources = new Dictionary<string, List<CommandNode>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cmd in result)
+            if (cmdTriggers.TryGetValue(cmd.Id, out var trigs))
+                foreach (var src in trigs)
+                {
+                    if (!dirtySources.ContainsKey(src)) dirtySources[src] = [];
+                    dirtySources[src].Add(cmd);
+                }
+
+        return (result, dirtySources);
     }
 
     /// Walk backward through synthetic (#include) commands to collect transitive header inputs.
