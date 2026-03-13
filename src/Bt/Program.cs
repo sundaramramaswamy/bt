@@ -466,10 +466,8 @@ static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryR
     {
         foreach (var cmd in plan)
         {
-            // Collapse newlines in command line (link.exe has multi-line .obj args)
-            var cmdLine = cmd.CommandLine.ReplaceLineEndings(" ").Trim();
             Console.Error.WriteLine($"{Clr.Cyan}[{cmd.Tool}]{Clr.Reset} {Clr.Dim}{cmd.Project}{Clr.Reset}");
-            Console.WriteLine(cmdLine);
+            Console.WriteLine(cmd.CommandLine);
             Console.Error.WriteLine();
         }
         return 0;
@@ -1134,8 +1132,8 @@ class BuildGraph
             var toolName = task.Name;
             // Extract the full command line from binlog (available for CL, Link, Lib, MIDL)
             // CommandLineArguments is a child of the task, not inside the Parameters folder.
-            var cmdLineRaw = task.FindChildrenRecursive<Property>(p => p.Name == "CommandLineArguments")
-                .FirstOrDefault()?.Value ?? "";
+            var cmdLineRaw = (task.FindChildrenRecursive<Property>(p => p.Name == "CommandLineArguments")
+                .FirstOrDefault()?.Value ?? "").ReplaceLineEndings(" ").Trim();
             var sources = pf.Children.OfType<Parameter>()
                 .FirstOrDefault(p => p.Name == "Sources")
                 ?.Children.OfType<Item>()
