@@ -31,6 +31,12 @@ var sourcesFilesArg = new Argument<string[]>("files") { Description = "Output fi
 var sourcesOfCmd = new Command("srcs", "List all upstream files that feed into <file>");
 sourcesOfCmd.Add(sourcesFilesArg);
 
+var affectedFilesArg = new Argument<string[]>("files") { Description = "Changed files", Arity = ArgumentArity.ZeroOrMore };
+var affectedGitOption = new Option<bool>("--git") { Description = "Detect changed files from git (unstaged + staged)" };
+var affectedCmd = new Command("affected", "List commands to re-run for changed files");
+affectedCmd.Add(affectedFilesArg);
+affectedCmd.Add(affectedGitOption);
+
 // -- Wire up --
 var root = new RootCommand("bt — MSBuild dependency graph explorer");
 root.Add(binlogOption);
@@ -38,12 +44,13 @@ root.Add(colorOption);
 root.Add(graphCmd);
 root.Add(outputsOfCmd);
 root.Add(sourcesOfCmd);
+root.Add(affectedCmd);
 
 // Custom coloured help — runs before System.CommandLine's default help
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
-    if (args.Length == 0 || !args.Any(a => a is "graph" or "outs" or "srcs"))
+    if (args.Length == 0 || !args.Any(a => a is "graph" or "outs" or "srcs" or "affected"))
     {
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
@@ -53,9 +60,10 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
         {Clr.Yellow}Usage:{Clr.Reset}  bt [command] [options]
 
         {Clr.Yellow}Commands:{Clr.Reset}
-          {Clr.Cyan}graph{Clr.Reset}         Emit Graphviz DOT dependency graph
-          {Clr.Cyan}outs{Clr.Reset} <files>  List all downstream files reachable from <file>  (tree)
-          {Clr.Cyan}srcs{Clr.Reset} <files>  List all upstream files that feed into <file>    (tree)
+          {Clr.Cyan}graph{Clr.Reset}              Emit Graphviz DOT dependency graph
+          {Clr.Cyan}outs{Clr.Reset} <files>       Downstream dependency tree
+          {Clr.Cyan}srcs{Clr.Reset} <files>       Upstream dependency tree
+          {Clr.Cyan}affected{Clr.Reset} [files]   Build plan for changed files (topo-sorted commands)
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
@@ -70,6 +78,8 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Dim}bt graph -f TestDataItem.h{Clr.Reset}
           {Clr.Dim}bt outs TestDataItem.h{Clr.Reset}
           {Clr.Dim}bt srcs XaBench.exe{Clr.Reset}
+          {Clr.Dim}bt affected --git{Clr.Reset}
+          {Clr.Dim}bt affected src/Foo.cpp src/Bar.h{Clr.Reset}
         """);
         return 0;
     }
@@ -95,6 +105,14 @@ sourcesOfCmd.SetAction(result =>
     var g = Setup(result);
     var files = result.GetValue(sourcesFilesArg)!;
     return SourcesOf(g, files);
+});
+
+affectedCmd.SetAction(result =>
+{
+    var g = Setup(result);
+    var explicitFiles = result.GetValue(affectedFilesArg) ?? [];
+    var useGit = result.GetValue(affectedGitOption);
+    return Affected(g, explicitFiles, useGit);
 });
 
 return root.Parse(args).Invoke();
@@ -305,6 +323,105 @@ static void PrintTreeBackward(BuildGraph g, string filePath, string indent, bool
         }
         Console.WriteLine($"{indent}{branch}{Clr.Dim}[{cmd.Tool}]{Clr.Reset} {FileClr(g, input)}{input}{Clr.Reset}");
         PrintTreeBackward(g, input, indent + cont, isLast, seen);
+    }
+}
+
+static int Affected(BuildGraph g, string[] explicitFiles, bool useGit)
+{
+    // Gather changed files
+    var changedArgs = new List<string>(explicitFiles);
+    if (useGit || changedArgs.Count == 0)
+    {
+        var gitFiles = GetGitChangedFiles(g.RootDir);
+        if (gitFiles == null) return 1; // error printed by helper
+        changedArgs.AddRange(gitFiles);
+    }
+    if (changedArgs.Count == 0)
+    {
+        Console.Error.WriteLine($"{Clr.Dim}No changed files.{Clr.Reset}");
+        return 0;
+    }
+
+    // Resolve to graph paths
+    var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var arg in changedArgs)
+    {
+        var r = ResolveFileArg(g, arg);
+        if (r != null) resolved.Add(r);
+    }
+    if (resolved.Count == 0)
+    {
+        Console.Error.WriteLine($"{Clr.Dim}No changed files found in graph.{Clr.Reset}");
+        return 0;
+    }
+
+    Console.Error.WriteLine($"{Clr.Dim}Changed files ({resolved.Count}):{Clr.Reset}");
+    foreach (var f in resolved.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
+    Console.Error.WriteLine();
+
+    // Collect affected commands in topo order
+    var plan = g.GetAffectedCommands(resolved);
+    if (plan.Count == 0)
+    {
+        Console.Error.WriteLine($"{Clr.Dim}No commands affected.{Clr.Reset}");
+        return 0;
+    }
+
+    Console.Error.WriteLine($"{Clr.Yellow}Build plan ({plan.Count} commands):{Clr.Reset}");
+    Console.Error.WriteLine();
+    int step = 0;
+    foreach (var cmd in plan)
+    {
+        step++;
+        Console.WriteLine($"{Clr.Bold}{step,3}. [{cmd.Tool}]{Clr.Reset}  {Clr.Dim}{cmd.Project}{Clr.Reset}");
+        foreach (var i in cmd.Inputs)
+            Console.WriteLine($"       in:  {Clr.Green}{i}{Clr.Reset}");
+        foreach (var o in cmd.Outputs)
+            Console.WriteLine($"       out: {Clr.Yellow}{o}{Clr.Reset}");
+    }
+    return 0;
+}
+
+static List<string>? GetGitChangedFiles(string rootDir)
+{
+    try
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("git", "diff --name-only HEAD")
+        {
+            WorkingDirectory = rootDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        using var proc = System.Diagnostics.Process.Start(psi);
+        if (proc == null) { Console.Error.WriteLine($"{Clr.Red}Failed to start git{Clr.Reset}"); return null; }
+        var output = proc.StandardOutput.ReadToEnd();
+        proc.WaitForExit();
+
+        // Also get unstaged changes (untracked won't be in graph anyway)
+        var psi2 = new System.Diagnostics.ProcessStartInfo("git", "diff --name-only")
+        {
+            WorkingDirectory = rootDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        using var proc2 = System.Diagnostics.Process.Start(psi2);
+        if (proc2 != null)
+        {
+            output += proc2.StandardOutput.ReadToEnd();
+            proc2.WaitForExit();
+        }
+
+        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"{Clr.Red}git error:{Clr.Reset} {ex.Message}");
+        return null;
     }
 }
 
@@ -615,6 +732,85 @@ class BuildGraph
         if (!Commands.TryGetValue(producerId, out var cmd)) return;
         foreach (var input in cmd.Inputs)
             CollectBackward(input, visited);
+    }
+
+    /// Given a set of changed files, find all commands that need to re-run,
+    /// returned in topological (dependency-first) order.
+    /// Skips synthetic commands (#include) since they aren't real build steps.
+    public List<CommandNode> GetAffectedCommands(IEnumerable<string> changedFiles)
+    {
+        // Walk forward from changed files, collecting affected command IDs
+        var affectedCmds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visitedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void WalkAffected(string filePath)
+        {
+            if (!visitedFiles.Add(filePath)) return;
+            if (!FileToConsumers.TryGetValue(filePath, out var consumerIds)) return;
+            foreach (var cmdId in consumerIds)
+            {
+                affectedCmds.Add(cmdId);
+                if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+                foreach (var output in cmd.Outputs)
+                    WalkAffected(output);
+            }
+        }
+
+        foreach (var f in changedFiles)
+            WalkAffected(f);
+
+        // Topo-sort: a command comes after all commands that produce its inputs.
+        // Kahn's algorithm on the affected subset.
+        var inDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var dependents = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cmdId in affectedCmds)
+        {
+            inDegree.TryAdd(cmdId, 0);
+            dependents.TryAdd(cmdId, []);
+        }
+        foreach (var cmdId in affectedCmds)
+        {
+            if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+            foreach (var input in cmd.Inputs)
+            {
+                if (!FileToProducer.TryGetValue(input, out var depCmdId)) continue;
+                if (!affectedCmds.Contains(depCmdId)) continue;
+                inDegree[cmdId] = inDegree.GetValueOrDefault(cmdId) + 1;
+                if (!dependents.TryGetValue(depCmdId, out var depList))
+                {
+                    depList = [];
+                    dependents[depCmdId] = depList;
+                }
+                depList.Add(cmdId);
+            }
+        }
+
+        var queue = new Queue<string>(inDegree.Where(kv => kv.Value == 0).Select(kv => kv.Key).OrderBy(k => k));
+        var result = new List<CommandNode>();
+        var seenOutputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (queue.Count > 0)
+        {
+            var cmdId = queue.Dequeue();
+            if (Commands.TryGetValue(cmdId, out var cmd) && !cmd.Tool.StartsWith("#"))
+                result.Add(cmd);
+            if (!dependents.TryGetValue(cmdId, out var deps)) continue;
+            foreach (var dep in deps.OrderBy(d => d))
+            {
+                inDegree[dep]--;
+                if (inDegree[dep] == 0) queue.Enqueue(dep);
+            }
+        }
+
+        // Dedup: if multiple commands produce the same output set, keep the one
+        // with the most inputs (most complete). Common with duplicate Link tasks.
+        var deduped = new List<CommandNode>();
+        foreach (var cmd in result)
+        {
+            var outputKey = string.Join("|", cmd.Outputs.OrderBy(o => o, StringComparer.OrdinalIgnoreCase));
+            if (seenOutputs.Add(outputKey))
+                deduped.Add(cmd);
+        }
+        return deduped;
     }
 
     // --- Factory ---
