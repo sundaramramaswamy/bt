@@ -1,208 +1,205 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Build.Logging.StructuredLogger;
+using MSTask = Microsoft.Build.Logging.StructuredLogger.Task;
 
-class Program
+// ============================================================
+// BinlogExplorer — reusable tool for probing MSBuild binlogs.
+//   Usage: BinlogExplorer <binlog> <command> [args...]
+//   Commands:
+//     tasks                     List all task types (grouped, with counts)
+//     tree <TaskName> [N]       Dump tree for first N instances of TaskName
+//     props <TaskName> [N]      Show parameters/items for first N instances
+//     search <pattern>          Find nodes whose text matches (case-insensitive)
+//     targets [project-filter]  List targets per project
+// ============================================================
+
+if (args.Length < 2) { Usage(); return 1; }
+
+var binlogPath = args[0];
+var command = args[1].ToLowerInvariant();
+
+if (!File.Exists(binlogPath)) { Console.Error.WriteLine($"error: {binlogPath} not found"); return 1; }
+var build = BinaryLog.ReadBuild(binlogPath);
+
+return command switch
 {
-    static void Main(string[] args)
+    "tasks"   => Tasks(build),
+    "tree"    => Tree(build, args),
+    "props"   => Props(build, args),
+    "search"  => Search(build, args),
+    "targets" => Targets(build, args),
+    _         => Usage()
+};
+
+// -----------------------------------------------------------
+
+int Usage()
+{
+    Console.Error.WriteLine("Usage: BinlogExplorer <binlog> <command> [args...]");
+    Console.Error.WriteLine("  tasks                     List task types with counts");
+    Console.Error.WriteLine("  tree <TaskName> [N]       Dump tree for first N instances");
+    Console.Error.WriteLine("  props <TaskName> [N]      Show parameters/items for instances");
+    Console.Error.WriteLine("  search <pattern>          Search node text (case-insensitive)");
+    Console.Error.WriteLine("  targets [project-filter]  List targets per project");
+    return 1;
+}
+
+int Tasks(Build build)
+{
+    var tasks = build.FindChildrenRecursive<MSTask>().ToList();
+    Console.WriteLine($"Total tasks: {tasks.Count}\n");
+    foreach (var g in tasks
+        .GroupBy(t => $"{Project(t)}|{t.Name}")
+        .OrderBy(g => g.Key))
+        Console.WriteLine($"  {g.Count(),3}x  {g.Key}");
+    return 0;
+}
+
+int Tree(Build build, string[] args)
+{
+    if (args.Length < 3) { Console.Error.WriteLine("Usage: tree <TaskName> [N]"); return 1; }
+    var name = args[2];
+    var limit = args.Length > 3 ? int.Parse(args[3]) : 3;
+    var tasks = build.FindChildrenRecursive<MSTask>(t => t.Name == name).Take(limit).ToList();
+    Console.WriteLine($"Found {tasks.Count} {name} task(s) (showing ≤{limit}):\n");
+    foreach (var t in tasks)
     {
-        Console.WriteLine("=== Binlog Dependency Explorer ===\n");
-        
-        string binlogPath = "../../msbuild.binlog";
-        Console.WriteLine($"Loading binlog from: {binlogPath}");
-        
-        try
-        {
-            var build = BinaryLog.ReadBuild(binlogPath);
-            Console.WriteLine($"Build loaded successfully. Root: {build.GetType().Name}\n");
-
-            // Search for all CL tasks
-            Console.WriteLine("=== SEARCHING FOR CL TASKS ===\n");
-            var clTasks = FindAllNodes(build, n => 
-                n is Task task && (task.Name == "CL" || task.Name.Contains("CL.exe"))
-            ).Cast<Task>().ToList();
-
-            Console.WriteLine($"Found {clTasks.Count} CL tasks\n");
-
-            foreach (var clTask in clTasks.Take(10)) // Limit to first 10
-            {
-                Console.WriteLine($"\n--- CL Task: {clTask.Name} ---");
-                DumpNodeStructure(clTask, depth: 0, maxDepth: 6);
-            }
-
-            // Search for any node that might contain header/include information
-            Console.WriteLine("\n\n=== SEARCHING FOR DEPENDENCY-RELATED NODES ===\n");
-            
-            var allNodes = FindAllNodes(build, n => true).ToList();
-            Console.WriteLine($"Total nodes in binlog: {allNodes.Count}\n");
-
-            // Look for specific node types and names
-            var keywords = new[] { "include", "header", ".h", ".hpp", "tracker", "tlog", 
-                                   "read file", "dependency", "CLCommandThatRefersToInputs", 
-                                   "TrackedFileAccess", "showIncludes", "input", "output" };
-
-            var interestingNodes = new HashSet<BaseNode>();
-            foreach (var keyword in keywords)
-            {
-                var matches = FindAllNodes(build, n => 
-                    n.Name != null && n.Name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0
-                ).ToList();
-
-                foreach (var match in matches)
-                {
-                    interestingNodes.Add(match);
-                }
-            }
-
-            Console.WriteLine($"Found {interestingNodes.Count} nodes matching keywords\n");
-            foreach (var node in interestingNodes.OrderBy(n => n.GetType().Name).ThenBy(n => n.Name))
-            {
-                Console.WriteLine($"  [{node.GetType().Name}] {node.Name}");
-            }
-
-            // Look for any nodes with .h or .hpp references in their properties/children
-            Console.WriteLine("\n\n=== SEARCHING FOR .h/.hpp FILE REFERENCES ===\n");
-            var headerRefNodes = FindAllNodes(build, n => 
-            {
-                var text = n.ToString() ?? "";
-                return (text.Contains(".h\"") || text.Contains(".h'") || 
-                        text.Contains(".hpp\"") || text.Contains(".hpp'") ||
-                        text.Contains(".h ") || text.Contains(".hpp "));
-            }).Take(50).ToList();
-
-            Console.WriteLine($"Found {headerRefNodes.Count} nodes referencing header files (showing first 50):\n");
-            foreach (var node in headerRefNodes)
-            {
-                Console.WriteLine($"[{node.GetType().Name}] {node.Name}");
-                Console.WriteLine($"  Text: {node.ToString().Substring(0, Math.Min(200, node.ToString().Length))}");
-                Console.WriteLine();
-            }
-
-            // Dump all Task nodes to see structure
-            Console.WriteLine("\n\n=== ALL TASKS IN BUILD ===\n");
-            var allTasks = FindAllNodes(build, n => n is Task).Cast<Task>().ToList();
-            Console.WriteLine($"Total tasks: {allTasks.Count}\n");
-            
-            var taskGroups = allTasks.GroupBy(t => t.Name).OrderByDescending(g => g.Count());
-            foreach (var group in taskGroups.Take(20))
-            {
-                Console.WriteLine($"  {group.Key}: {group.Count()}");
-            }
-
-            // For each CL task, dump its FULL tree
-            Console.WriteLine("\n\n=== DETAILED CL TASK TREE DUMP ===\n");
-            foreach (var clTask in clTasks.Take(3))
-            {
-                Console.WriteLine($"\n>>> CL Task: {clTask.Name} <<<");
-                DumpFullTree(clTask, depth: 0);
-            }
-
-            Console.WriteLine("\n\n=== SEARCH FOR .tlog OR FILE TRACKER OUTPUT ===\n");
-            var tlogNodes = FindAllNodes(build, n => 
-                n.Name != null && (n.Name.Contains(".tlog") || n.Name.Contains("tlog"))
-            ).ToList();
-            Console.WriteLine($"Found {tlogNodes.Count} tlog-related nodes:\n");
-            foreach (var node in tlogNodes)
-            {
-                Console.WriteLine($"[{node.GetType().Name}] {node.Name}");
-            }
-
-            Console.WriteLine("\n\n=== Search for Message nodes with 'reading' or 'tracking' ===\n");
-            var msgNodes = FindAllNodes(build, n => n is Message msg)
-                .Cast<Message>()
-                .Where(m => m.Text != null && (m.Text.Contains("reading", StringComparison.OrdinalIgnoreCase) || 
-                                               m.Text.Contains("tracking", StringComparison.OrdinalIgnoreCase) ||
-                                               m.Text.Contains("includes", StringComparison.OrdinalIgnoreCase)))
-                .Take(20)
-                .ToList();
-
-            Console.WriteLine($"Found {msgNodes.Count} relevant messages:\n");
-            foreach (var msg in msgNodes)
-            {
-                Console.WriteLine($"  {msg.Text.Substring(0, Math.Min(150, msg.Text.Length))}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error: {ex}");
-        }
+        Console.WriteLine($"--- {t.Name} in {Project(t)} / {Target(t)} ---");
+        DumpTree(t, 0, 8);
+        Console.WriteLine();
     }
+    return 0;
+}
 
-    static List<BaseNode> FindAllNodes(BaseNode root, Func<BaseNode, bool> predicate, List<BaseNode> results = null)
+int Props(Build build, string[] args)
+{
+    if (args.Length < 3) { Console.Error.WriteLine("Usage: props <TaskName> [N]"); return 1; }
+    var name = args[2];
+    var limit = args.Length > 3 ? int.Parse(args[3]) : 5;
+    var tasks = build.FindChildrenRecursive<MSTask>(t => t.Name == name).Take(limit).ToList();
+    Console.WriteLine($"Found {tasks.Count} {name} task(s) (showing ≤{limit}):\n");
+    foreach (var t in tasks)
     {
-        results ??= new List<BaseNode>();
+        Console.WriteLine($"--- {t.Name} in {Project(t)} / {Target(t)} ---");
+        if (!string.IsNullOrEmpty(t.CommandLineArguments))
+            Console.WriteLine($"  CMD: {Trunc(t.CommandLineArguments, 300)}");
 
-        if (predicate(root))
+        foreach (var child in t.Children)
         {
-            results.Add(root);
-        }
-
-        if (root is IHasChildren hasChildren)
-        {
-            foreach (var child in hasChildren.Children)
+            if (child is Property prop)
+                Console.WriteLine($"  [Property] {prop.Name} = {Trunc(prop.Value, 200)}");
+            else if (child is Parameter param)
             {
-                FindAllNodes(child, predicate, results);
+                Console.WriteLine($"  [Parameter] {param.Name}:");
+                foreach (var item in param.Children.OfType<Item>().Take(20))
+                    Console.WriteLine($"    - {item.Text}");
+                if (param.Children.Count > 20)
+                    Console.WriteLine($"    ... and {param.Children.Count - 20} more");
             }
+            else if (child is Folder folder)
+            {
+                Console.WriteLine($"  [Folder] {folder.Name}:");
+                DumpTree(folder, 2, 4);
+            }
+            else if (child is NamedNode named)
+                Console.WriteLine($"  [{child.GetType().Name}] {named.Name}");
         }
-
-        return results;
+        Console.WriteLine();
     }
+    return 0;
+}
 
-    static void DumpNodeStructure(BaseNode node, int depth, int maxDepth)
+int Search(Build build, string[] args)
+{
+    if (args.Length < 3) { Console.Error.WriteLine("Usage: search <pattern>"); return 1; }
+    var pattern = args[2];
+    var matches = new List<(string Type, string Text, string Context)>();
+    WalkAll(build, node =>
     {
-        if (depth > maxDepth) return;
-
-        string indent = new string(' ', depth * 2);
-        Console.WriteLine($"{indent}[{node.GetType().Name}] {node.Name}");
-
-        if (!string.IsNullOrEmpty(node.ToString()) && node.ToString().Length > 0)
+        var text = node switch
         {
-            var text = node.ToString();
-            if (text.Length > 150)
-                text = text.Substring(0, 150) + "...";
-            Console.WriteLine($"{indent}  → {text}");
-        }
+            Message m  => m.Text,
+            Property p => $"{p.Name} = {p.Value}",
+            Item i     => i.Text,
+            NamedNode n => n.Name,
+            _          => null
+        };
+        if (text != null && text.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+            matches.Add((node.GetType().Name, Trunc(text, 200), ContextPath(node)));
+    });
+    Console.WriteLine($"Found {matches.Count} matches for '{pattern}':\n");
+    foreach (var (type, text, ctx) in matches.Take(100))
+        Console.WriteLine($"  [{type}] {ctx}\n    {text}");
+    if (matches.Count > 100)
+        Console.WriteLine($"\n  ... and {matches.Count - 100} more");
+    return 0;
+}
 
-        if (node is IHasChildren hasChildren)
-        {
-            foreach (var child in hasChildren.Children.Take(10))
-            {
-                DumpNodeStructure(child, depth + 1, maxDepth);
-            }
-            if (hasChildren.Children.Count > 10)
-            {
-                Console.WriteLine($"{indent}  ... and {hasChildren.Children.Count - 10} more children");
-            }
-        }
-    }
-
-    static void DumpFullTree(BaseNode node, int depth)
+int Targets(Build build, string[] args)
+{
+    var filter = args.Length > 2 ? args[2] : null;
+    var projects = build.FindChildrenRecursive<Project>()
+        .Where(p => filter == null || p.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+    foreach (var proj in projects)
     {
-        if (depth > 8) return; // Hard limit
-
-        string indent = new string(' ', depth * 2);
-        Console.WriteLine($"{indent}[{node.GetType().Name}] {node.Name}");
-
-        // Try to get useful text info
-        if (node is Task task)
-        {
-            if (!string.IsNullOrEmpty(task.CommandLineArguments))
-                Console.WriteLine($"{indent}  CMD: {task.CommandLineArguments.Substring(0, Math.Min(200, task.CommandLineArguments.Length))}");
-        }
-        else if (node is Message msg)
-        {
-            if (!string.IsNullOrEmpty(msg.Text))
-                Console.WriteLine($"{indent}  MSG: {msg.Text.Substring(0, Math.Min(200, msg.Text.Length))}");
-        }
-
-        if (node is IHasChildren hasChildren && hasChildren.Children.Count > 0)
-        {
-            Console.WriteLine($"{indent}  Children ({hasChildren.Children.Count}):");
-            foreach (var child in hasChildren.Children)
-            {
-                DumpFullTree(child, depth + 1);
-            }
-        }
+        Console.WriteLine($"\n=== {proj.Name} ===");
+        foreach (var tgt in proj.Children.OfType<Target>())
+            Console.WriteLine($"  {tgt.Name}");
     }
+    return 0;
+}
+
+// --- Helpers ---
+
+static string Project(BaseNode node) =>
+    node.GetNearestParent<Project>()?.Name ?? "?";
+
+static string Target(BaseNode node) =>
+    node.GetNearestParent<Target>()?.Name ?? "?";
+
+static string Trunc(string s, int max) =>
+    s.Length <= max ? s : s[..max] + "...";
+
+static string ContextPath(BaseNode node)
+{
+    var parts = new List<string>();
+    var n = node.Parent;
+    while (n != null)
+    {
+        if (n is Project p) { parts.Add(p.Name); break; }
+        if (n is Target t) parts.Add(t.Name);
+        if (n is MSTask task) parts.Add(task.Name);
+        n = n.Parent;
+    }
+    parts.Reverse();
+    return string.Join(" > ", parts);
+}
+
+static void WalkAll(BaseNode node, Action<BaseNode> action)
+{
+    action(node);
+    if (node is TreeNode tree)
+        foreach (var child in tree.Children)
+            WalkAll(child, action);
+}
+
+static void DumpTree(BaseNode node, int depth, int maxDepth)
+{
+    if (depth > maxDepth) return;
+    var indent = new string(' ', depth * 2);
+    var label = node switch
+    {
+        Message m  => $"[Message] {Trunc(m.Text ?? "", 150)}",
+        Property p => $"[Property] {p.Name} = {Trunc(p.Value ?? "", 150)}",
+        Item i     => $"[Item] {Trunc(i.Text ?? "", 150)}",
+        MSTask t   => $"[Task] {t.Name}",
+        _          => $"[{node.GetType().Name}] {(node is NamedNode nn ? nn.Name : node.ToString() ?? "")}"
+    };
+    Console.WriteLine($"{indent}{label}");
+    if (node is TreeNode tree)
+        foreach (var child in tree.Children)
+            DumpTree(child, depth + 1, maxDepth);
 }
