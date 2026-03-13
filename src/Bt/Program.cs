@@ -312,6 +312,9 @@ class BuildGraph
         var graph = new BuildGraph { RootDir = rootDir };
         int cmdIndex = 0;
 
+        // Track CL command IDs per project so we can wire headers to them later.
+        var clCmdsByProject = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name is "CL" or "Link" or "Lib"))
         {
             var projNode = task.GetNearestParent<Project>();
@@ -351,6 +354,13 @@ class BuildGraph
                     graph.Files.TryAdd(obj, new FileNode(obj, FileKind.Intermediate));
                     graph.AddConsumer(src, cmdId);
                     graph.FileToProducer[obj] = cmdId;
+
+                    if (!clCmdsByProject.TryGetValue(proj, out var projCmds))
+                    {
+                        projCmds = [];
+                        clCmdsByProject[proj] = projCmds;
+                    }
+                    projCmds.Add(cmdId);
                 }
             }
             else // Link or Lib — N inputs → 1 output
@@ -371,6 +381,35 @@ class BuildGraph
                 {
                     graph.Files.TryAdd(input, new FileNode(input, FileKinds.Classify(input)));
                     graph.AddConsumer(input, cmdId);
+                }
+            }
+        }
+
+        // Wire ClInclude headers into the graph (conservative: each header feeds
+        // every CL command in its project, since the binlog doesn't track per-source
+        // include dependencies — tlog refinement can narrow this later).
+        // ClInclude items live under ProjectEvaluation, not Project.
+        foreach (var addItem in build.FindChildrenRecursive<AddItem>(ai => ai.Name == "ClInclude"))
+        {
+            var eval = addItem.GetNearestParent<ProjectEvaluation>();
+            var proj = eval?.Name ?? "unknown";
+            var projDir = eval?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(eval.ProjectFile)) ?? ""
+                : "";
+
+            if (!clCmdsByProject.TryGetValue(proj, out var projCmds)) continue;
+
+            foreach (var item in addItem.Children.OfType<Item>())
+            {
+                var headerPath = graph.ToRelative(ResolveAbsolute(projDir, item.Text));
+                graph.Files.TryAdd(headerPath, new FileNode(headerPath, FileKinds.Classify(headerPath)));
+
+                foreach (var cmdId in projCmds)
+                {
+                    graph.AddConsumer(headerPath, cmdId);
+                    // Also add header to the command's Inputs list
+                    if (graph.Commands.TryGetValue(cmdId, out var cmd) && !cmd.Inputs.Contains(headerPath, StringComparer.OrdinalIgnoreCase))
+                        cmd.Inputs.Add(headerPath);
                 }
             }
         }
