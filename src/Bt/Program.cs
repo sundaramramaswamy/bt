@@ -377,7 +377,8 @@ static int Affected(BuildGraph g, string[] explicitFiles)
         // Default: mtime-based dirty detection (make/ninja-style)
         Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
         var (mtimePlan, dirtySources) = g.GetDirtyCommandsByMtime();
-        plan = mtimePlan;
+        // Only show commands we can actually execute
+        plan = mtimePlan.Where(c => !string.IsNullOrEmpty(c.CommandLine)).ToList();
 
         if (plan.Count == 0)
         {
