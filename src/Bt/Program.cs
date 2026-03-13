@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.Build.Logging.StructuredLogger;
 using MSTask = Microsoft.Build.Logging.StructuredLogger.Task;
@@ -704,7 +705,7 @@ static BuildGraph LoadGraph(string binlogPath)
 
     var binlogDir = Path.GetDirectoryName(Path.GetFullPath(binlogPath)) ?? ".";
     var cacheDir = Path.Combine(binlogDir, ".bt");
-    var cacheName = Path.GetFileNameWithoutExtension(binlogPath) + ".graph.json";
+    var cacheName = Path.GetFileNameWithoutExtension(binlogPath) + ".graph.json.gz";
     var cachePath = Path.Combine(cacheDir, cacheName);
     var binlogStamp = File.GetLastWriteTimeUtc(binlogPath);
 
@@ -1986,11 +1987,17 @@ class GraphCache
                 CommandLine = c.CommandLine, WorkingDir = c.WorkingDir
             }).ToList()
         };
-        File.WriteAllText(path, JsonSerializer.Serialize(cache, JsonOpts));
+        using var fs = File.Create(path);
+        using var gz = new GZipStream(fs, CompressionLevel.Optimal);
+        JsonSerializer.Serialize(gz, cache, JsonOpts);
     }
 
     public static GraphCache? Load(string path)
-        => JsonSerializer.Deserialize<GraphCache>(File.ReadAllText(path), JsonOpts);
+    {
+        using var fs = File.OpenRead(path);
+        using var gz = new GZipStream(fs, CompressionMode.Decompress);
+        return JsonSerializer.Deserialize<GraphCache>(gz, JsonOpts);
+    }
 
     public BuildGraph ToGraph()
     {
