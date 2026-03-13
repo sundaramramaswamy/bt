@@ -60,6 +60,12 @@ BuildGraph Setup(ParseResult result)
     var binlog = result.GetValue(binlogOption)!;
     var color = result.GetValue(colorOption)!;
     Clr.SetMode(color);
+
+    // If default path doesn't exist, try common variants
+    if (!File.Exists(binlog) && binlog == "msbuild.binlog")
+        foreach (var alt in new[] { "msbuild_debug.binlog", "msbuild_release.binlog" })
+            if (File.Exists(alt)) { binlog = alt; break; }
+
     return LoadGraph(Path.GetFullPath(binlog));
 }
 
@@ -69,35 +75,42 @@ BuildGraph Setup(ParseResult result)
 
 static int ShowGraph(BuildGraph g)
 {
-    // Developer-centric graph: sources and outputs are visible.
-    // Intermediates (.obj, .pch) are collapsed — edges skip through them.
+    // Developer-centric graph: sources, intermediates (.obj), and outputs are visible.
+    // Only hidden intermediates (.pch, .res) are collapsed — edges skip through them.
     var visible = g.Files.Values.Where(f => FileKinds.IsDevVisible(f.Kind)).ToList();
 
-    // Walk forward from each source to its nearest visible outputs.
-    // Only one "hop" through intermediate nodes — no transitive shortcuts.
-    var edges = new HashSet<(string src, string output)>();
-    foreach (var src in visible.Where(f => f.Kind == FileKind.Source))
-        foreach (var output in g.GetNearestVisibleOutputsOf(src.Path))
-            edges.Add((src.Path, output));
+    // Walk forward from each visible file to its nearest visible outputs.
+    // Returns edges as (source, tool, output) triples.
+    var edges = new HashSet<(string src, string tool, string output)>();
+    foreach (var f in visible)
+        foreach (var (tool, output) in g.GetNearestVisibleEdgesFrom(f.Path))
+            edges.Add((f.Path, tool, output));
 
     Console.WriteLine("digraph build {");
     Console.WriteLine("  rankdir=LR;");
     Console.WriteLine("  node [fontname=\"Consolas\" fontsize=10];");
+    Console.WriteLine("  edge [fontname=\"Consolas\" fontsize=8];");
     Console.WriteLine();
 
     var nodeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    foreach (var (s, o) in edges) { nodeSet.Add(s); nodeSet.Add(o); }
+    foreach (var (s, _, o) in edges) { nodeSet.Add(s); nodeSet.Add(o); }
 
     foreach (var path in nodeSet)
     {
         if (!g.Files.TryGetValue(path, out var f)) continue;
-        var shape = f.Kind == FileKind.Source ? "note" : "box3d";
+        var shape = f.Kind switch
+        {
+            FileKind.Source => "note",
+            FileKind.Intermediate => "ellipse",
+            FileKind.Output => "box3d",
+            _ => "box"
+        };
         Console.WriteLine($"  {Dot.Id(path)} [label=\"{Dot.Escape(path)}\" shape={shape}];");
     }
     Console.WriteLine();
 
-    foreach (var (s, o) in edges)
-        Console.WriteLine($"  {Dot.Id(s)} -> {Dot.Id(o)};");
+    foreach (var (s, tool, o) in edges)
+        Console.WriteLine($"  {Dot.Id(s)} -> {Dot.Id(o)} [label=\"{Dot.Escape(tool)}\"];");
 
     Console.WriteLine("}");
     return 0;
@@ -174,6 +187,7 @@ static BuildGraph LoadGraph(string binlogPath)
         Console.Error.WriteLine($"Run a full build with: {Clr.Dim}msbuild /bl{Clr.Reset}");
         Environment.Exit(1);
     }
+    Console.Error.WriteLine($"{Clr.Dim}binlog:{Clr.Reset} {binlogPath}");
     var build = BinaryLog.ReadBuild(binlogPath);
     return BuildGraph.FromBinlog(build);
 }
@@ -191,9 +205,9 @@ static class FileKinds
     static readonly HashSet<string> HeaderExts = new(StringComparer.OrdinalIgnoreCase)
         { ".h", ".hpp", ".hxx" };
     static readonly HashSet<string> OutputExts = new(StringComparer.OrdinalIgnoreCase)
-        { ".exe", ".dll", ".lib", ".winmd", ".xbf" };
+        { ".exe", ".dll", ".lib", ".winmd", ".xbf", ".obj" };
     static readonly HashSet<string> IntermediateExts = new(StringComparer.OrdinalIgnoreCase)
-        { ".obj", ".pch", ".res" };
+        { ".pch", ".res" };
 
     public static FileKind Classify(string path)
     {
@@ -270,6 +284,16 @@ class BuildGraph
         return result;
     }
 
+    /// Walk forward from a visible file, returning (tool, output) edges.
+    /// Skips through hidden intermediates, labelling with the first command's tool.
+    public HashSet<(string Tool, string Output)> GetNearestVisibleEdgesFrom(string filePath)
+    {
+        var result = new HashSet<(string, string)>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { filePath };
+        WalkToNearestVisibleEdges(filePath, null, visited, result);
+        return result;
+    }
+
     /// Given an output file, find all source files that feed into it.
     public HashSet<string> GetSourcesOf(string outputPath)
     {
@@ -303,7 +327,7 @@ class BuildGraph
     }
 
     /// Walk forward through commands, stopping at the first dev-visible file.
-    /// Intermediate files (.obj, .pch) are walked through transparently.
+    /// Hidden intermediates (.pch, .res) are walked through transparently.
     void WalkToNearestVisible(string filePath, HashSet<string> visited, HashSet<string> outputs)
     {
         if (!FileToConsumers.TryGetValue(filePath, out var consumerIds)) return;
@@ -318,6 +342,28 @@ class BuildGraph
                     outputs.Add(output);     // visible → stop here
                 else
                     WalkToNearestVisible(output, visited, outputs); // intermediate → keep walking
+            }
+        }
+    }
+
+    /// Walk forward, collecting (tool, output) edges. Carries the originating
+    /// tool label through hidden intermediates so the edge shows the first task.
+    void WalkToNearestVisibleEdges(string filePath, string? originTool,
+        HashSet<string> visited, HashSet<(string, string)> edges)
+    {
+        if (!FileToConsumers.TryGetValue(filePath, out var consumerIds)) return;
+
+        foreach (var cmdId in consumerIds)
+        {
+            if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+            var tool = originTool ?? cmd.Tool;
+            foreach (var output in cmd.Outputs)
+            {
+                if (!visited.Add(output)) continue;
+                if (Files.TryGetValue(output, out var f) && FileKinds.IsDevVisible(f.Kind))
+                    edges.Add((tool, output));
+                else
+                    WalkToNearestVisibleEdges(output, tool, visited, edges);
             }
         }
     }
@@ -393,7 +439,7 @@ class BuildGraph
                     var cmd = new CommandNode(cmdId, "CL", proj, target, [src], [obj]);
                     graph.Commands[cmdId] = cmd;
                     graph.Files.TryAdd(src, new FileNode(src, FileKinds.Classify(src)));
-                    graph.Files.TryAdd(obj, new FileNode(obj, FileKind.Intermediate));
+                    graph.Files.TryAdd(obj, new FileNode(obj, FileKinds.Classify(obj)));
                     graph.AddConsumer(src, cmdId);
                     graph.FileToProducer[obj] = cmdId;
 
