@@ -35,6 +35,16 @@ var affectedFilesArg = new Argument<string[]>("files") { Description = "Changed 
 var affectedCmd = new Command("dirty", "Build plan for changed files");
 affectedCmd.Add(affectedFilesArg);
 
+var buildFilesArg = new Argument<string[]>("files") { Description = "Changed files (default: git diff)", Arity = ArgumentArity.ZeroOrMore };
+var buildJobsOption = new Option<int>("-j") { Description = "Max parallel jobs (default: CPU cores)" };
+buildJobsOption.DefaultValueFactory = _ => Environment.ProcessorCount;
+var buildDryRunOption = new Option<bool>("--dry-run") { Description = "Print commands without executing" };
+buildDryRunOption.Aliases.Add("-n");
+var buildCmd = new Command("build", "Build only what's dirty");
+buildCmd.Add(buildFilesArg);
+buildCmd.Add(buildJobsOption);
+buildCmd.Add(buildDryRunOption);
+
 // -- Wire up --
 var root = new RootCommand("bt — MSBuild dependency graph explorer");
 root.Add(binlogOption);
@@ -43,12 +53,13 @@ root.Add(graphCmd);
 root.Add(outputsOfCmd);
 root.Add(sourcesOfCmd);
 root.Add(affectedCmd);
+root.Add(buildCmd);
 
 // Custom coloured help — runs before System.CommandLine's default help
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
-    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty"))
+    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build"))
     {
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
@@ -62,6 +73,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Cyan}bins{Clr.Reset} <files>       Downstream dependency tree
           {Clr.Cyan}srcs{Clr.Reset} <files>       Upstream dependency tree
           {Clr.Cyan}dirty{Clr.Reset} [files]      Build plan for changed files
+          {Clr.Cyan}build{Clr.Reset} [files]      Build only what's dirty (-j N, --dry-run)
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
@@ -78,6 +90,9 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Dim}bt srcs XaBench.exe{Clr.Reset}
           {Clr.Dim}bt dirty{Clr.Reset}
           {Clr.Dim}bt dirty src/Foo.cpp src/Bar.h{Clr.Reset}
+          {Clr.Dim}bt build{Clr.Reset}
+          {Clr.Dim}bt build -j 4 src/Foo.cpp{Clr.Reset}
+          {Clr.Dim}bt build --dry-run{Clr.Reset}
         """);
         return 0;
     }
@@ -110,6 +125,15 @@ affectedCmd.SetAction(result =>
     var g = Setup(result);
     var explicitFiles = result.GetValue(affectedFilesArg) ?? [];
     return Affected(g, explicitFiles);
+});
+
+buildCmd.SetAction(result =>
+{
+    var g = Setup(result);
+    var explicitFiles = result.GetValue(buildFilesArg) ?? [];
+    var maxJobs = result.GetValue(buildJobsOption);
+    var dryRun = result.GetValue(buildDryRunOption);
+    return RunBuild(g, explicitFiles, maxJobs, dryRun);
 });
 
 return root.Parse(args).Invoke();
@@ -380,6 +404,175 @@ static int Affected(BuildGraph g, string[] explicitFiles)
     return 0;
 }
 
+static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryRun)
+{
+    // Reuse the same resolution logic as Affected
+    var changedArgs = new List<string>(explicitFiles);
+    if (changedArgs.Count == 0)
+    {
+        var gitFiles = GetGitChangedFiles(g.RootDir);
+        if (gitFiles == null) return 1;
+        changedArgs.AddRange(gitFiles);
+    }
+    if (changedArgs.Count == 0)
+    {
+        Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
+        return 0;
+    }
+
+    var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var arg in changedArgs)
+    {
+        var r = ResolveFileArg(g, arg);
+        if (r != null) resolved.Add(r);
+    }
+    if (resolved.Count == 0)
+    {
+        Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
+        return 0;
+    }
+
+    var plan = g.GetAffectedCommands(resolved);
+    if (plan.Count == 0)
+    {
+        Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
+        return 0;
+    }
+
+    // Filter to commands that have command lines (skip synthetic)
+    plan = plan.Where(c => !string.IsNullOrEmpty(c.CommandLine)).ToList();
+    if (plan.Count == 0)
+    {
+        Console.Error.WriteLine($"{Clr.Yellow}No executable commands in plan.{Clr.Reset}");
+        return 0;
+    }
+
+    Console.Error.WriteLine($"{Clr.Bold}Build plan: {plan.Count} commands, {maxJobs} parallel jobs{Clr.Reset}");
+    Console.Error.WriteLine();
+
+    if (dryRun)
+    {
+        foreach (var cmd in plan)
+        {
+            Console.Error.WriteLine($"{Clr.Cyan}[{cmd.Tool}]{Clr.Reset} {Clr.Dim}{cmd.Project}{Clr.Reset}");
+            Console.WriteLine(cmd.CommandLine);
+            Console.Error.WriteLine();
+        }
+        return 0;
+    }
+
+    // Execute in waves: commands whose inputs are all "done" can run in parallel.
+    // Track which files have been produced.
+    var produced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    // All source files (not produced by any command) are available from the start.
+    foreach (var f in g.Files.Values)
+        if (!g.FileToProducer.ContainsKey(f.Path))
+            produced.Add(f.Path);
+
+    var remaining = new List<CommandNode>(plan);
+    int failures = 0;
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+
+    while (remaining.Count > 0)
+    {
+        // Find commands whose inputs are all produced
+        var wave = remaining.Where(c => c.Inputs.All(i => produced.Contains(i))).ToList();
+        if (wave.Count == 0)
+        {
+            Console.Error.WriteLine($"{Clr.Red}Deadlock: {remaining.Count} commands stuck (missing inputs){Clr.Reset}");
+            foreach (var c in remaining)
+            {
+                var missing = c.Inputs.Where(i => !produced.Contains(i)).ToList();
+                Console.Error.WriteLine($"  [{c.Tool}] waiting on: {string.Join(", ", missing.Take(3))}");
+            }
+            return 1;
+        }
+
+        foreach (var c in wave) remaining.Remove(c);
+
+        Console.Error.WriteLine($"{Clr.Dim}── wave: {wave.Count} commands ──{Clr.Reset}");
+
+        // Run wave in parallel
+        var results = new System.Collections.Concurrent.ConcurrentBag<(CommandNode cmd, int exitCode, string output)>();
+        Parallel.ForEach(wave, new ParallelOptions { MaxDegreeOfParallelism = maxJobs }, cmd =>
+        {
+            var (exitCode, output) = ExecuteCommand(cmd);
+            results.Add((cmd, exitCode, output));
+        });
+
+        // Process results
+        foreach (var (cmd, exitCode, output) in results)
+        {
+            if (exitCode == 0)
+            {
+                Console.Error.WriteLine($"  {Clr.Green}✓{Clr.Reset} [{cmd.Tool}] {cmd.Outputs.FirstOrDefault() ?? cmd.Id}");
+                foreach (var o in cmd.Outputs) produced.Add(o);
+            }
+            else
+            {
+                failures++;
+                Console.Error.WriteLine($"  {Clr.Red}✗{Clr.Reset} [{cmd.Tool}] {cmd.Outputs.FirstOrDefault() ?? cmd.Id}  (exit {exitCode})");
+                if (!string.IsNullOrWhiteSpace(output))
+                    Console.Error.WriteLine(output);
+                // Don't produce outputs — downstream commands will be stuck (caught by deadlock check)
+            }
+        }
+    }
+
+    sw.Stop();
+    Console.Error.WriteLine();
+    if (failures == 0)
+        Console.Error.WriteLine($"{Clr.Green}Build succeeded{Clr.Reset} ({plan.Count} commands, {sw.Elapsed.TotalSeconds:F1}s)");
+    else
+        Console.Error.WriteLine($"{Clr.Red}Build failed{Clr.Reset} ({failures}/{plan.Count} commands failed, {sw.Elapsed.TotalSeconds:F1}s)");
+
+    return failures > 0 ? 1 : 0;
+}
+
+static (int exitCode, string output) ExecuteCommand(CommandNode cmd)
+{
+    // Parse command line: first token is the executable, rest are arguments.
+    // The command line from binlog is a full invocation string.
+    var cmdLine = cmd.CommandLine;
+    string exe, args;
+
+    if (cmdLine.StartsWith('"'))
+    {
+        var endQuote = cmdLine.IndexOf('"', 1);
+        exe = endQuote > 0 ? cmdLine[1..endQuote] : cmdLine;
+        args = endQuote > 0 && endQuote + 1 < cmdLine.Length ? cmdLine[(endQuote + 2)..] : "";
+    }
+    else
+    {
+        var sp = cmdLine.IndexOf(' ');
+        exe = sp > 0 ? cmdLine[..sp] : cmdLine;
+        args = sp > 0 ? cmdLine[(sp + 1)..] : "";
+    }
+
+    var psi = new System.Diagnostics.ProcessStartInfo(exe, args)
+    {
+        WorkingDirectory = cmd.WorkingDir,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+    };
+
+    try
+    {
+        using var proc = System.Diagnostics.Process.Start(psi);
+        if (proc == null) return (1, "Failed to start process");
+        var stdout = proc.StandardOutput.ReadToEnd();
+        var stderr = proc.StandardError.ReadToEnd();
+        proc.WaitForExit();
+        var output = (stdout + stderr).Trim();
+        return (proc.ExitCode, output);
+    }
+    catch (Exception ex)
+    {
+        return (1, ex.Message);
+    }
+}
+
 static List<string>? GetGitChangedFiles(string rootDir)
 {
     try
@@ -558,7 +751,9 @@ record CommandNode(
     string Project,
     string Target,
     List<string> Inputs,
-    List<string> Outputs);
+    List<string> Outputs,
+    string CommandLine = "",   // full tool invocation from binlog
+    string WorkingDir = "");   // project directory
 
 class BuildGraph
 {
@@ -865,6 +1060,10 @@ class BuildGraph
             if (pf == null) continue;
 
             var toolName = task.Name;
+            // Extract the full command line from binlog (available for CL, Link, Lib, MIDL)
+            // CommandLineArguments is a child of the task, not inside the Parameters folder.
+            var cmdLineRaw = task.FindChildrenRecursive<Property>(p => p.Name == "CommandLineArguments")
+                .FirstOrDefault()?.Value ?? "";
             var sources = pf.Children.OfType<Parameter>()
                 .FirstOrDefault(p => p.Name == "Sources")
                 ?.Children.OfType<Item>()
@@ -888,7 +1087,11 @@ class BuildGraph
                     var obj = graph.ToRelative(Path.Combine(absObjDir,
                         Path.GetFileNameWithoutExtension(src) + ".obj"));
                     var cmdId = $"CL#{cmdIndex++}:{proj}/{target}";
-                    var cmd = new CommandNode(cmdId, "CL", proj, target, [src], [obj]);
+                    // Build per-file command line: strip batched sources, append single source
+                    var absSrc = Path.GetFullPath(Path.Combine(graph.RootDir, src));
+                    var absObj = Path.GetFullPath(Path.Combine(graph.RootDir, obj));
+                    var clCmdLine = BuildClCommandLine(cmdLineRaw, absSrc, absObj, sources.Count);
+                    var cmd = new CommandNode(cmdId, "CL", proj, target, [src], [obj], clCmdLine, projDir);
                     graph.Commands[cmdId] = cmd;
                     graph.Files.TryAdd(src, new FileNode(src, FileKinds.Classify(src)));
                     graph.Files.TryAdd(obj, new FileNode(obj, FileKinds.Classify(obj)));
@@ -896,7 +1099,6 @@ class BuildGraph
                     graph.FileToProducer[obj] = cmdId;
 
                     // Record absolute source path for tlog matching
-                    var absSrc = Path.GetFullPath(Path.Combine(graph.RootDir, src));
                     clCmdByAbsSource.TryAdd(absSrc, cmdId);
 
                     if (!clCmdsByProject.TryGetValue(proj, out var projCmds))
@@ -921,7 +1123,7 @@ class BuildGraph
                 var meta = graph.ToRelative(ResolveAbsolute(projDir, metaProp));
 
                 var cmdId = $"MIDL#{cmdIndex++}:{proj}/{target}";
-                var cmd = new CommandNode(cmdId, "MIDL", proj, target, [src], [meta]);
+                var cmd = new CommandNode(cmdId, "MIDL", proj, target, [src], [meta], cmdLineRaw, projDir);
                 graph.Commands[cmdId] = cmd;
                 graph.Files.TryAdd(src, new FileNode(src, FileKinds.Classify(src)));
                 graph.Files.TryAdd(meta, new FileNode(meta, FileKinds.Classify(meta)));
@@ -937,7 +1139,7 @@ class BuildGraph
                 if (string.IsNullOrEmpty(outFile)) continue;
 
                 var cmdId = $"{toolName}#{cmdIndex++}:{proj}/{target}";
-                var cmd = new CommandNode(cmdId, toolName, proj, target, sources, [outFile]);
+                var cmd = new CommandNode(cmdId, toolName, proj, target, sources, [outFile], cmdLineRaw, projDir);
                 graph.Commands[cmdId] = cmd;
                 graph.Files.TryAdd(outFile, new FileNode(outFile, FileKinds.Classify(outFile)));
                 graph.FileToProducer[outFile] = cmdId;
@@ -1413,6 +1615,42 @@ class BuildGraph
     }
 
     /// Resolve a potentially relative path to absolute using a base directory.
+    /// Build a per-file CL command line from the batched command line.
+    /// The batched cmdline ends with all source files; we strip them and
+    /// substitute the single source + explicit /Fo for the output.
+    static string BuildClCommandLine(string batchedCmdLine, string absSource, string absObj, int sourceCount)
+    {
+        if (string.IsNullOrEmpty(batchedCmdLine)) return "";
+        // CL cmdline format: cl.exe /flags... source1.cpp source2.cpp ...
+        // The source files are the last N tokens (unquoted .cpp paths or quoted).
+        // Strategy: find the tool + all flags (everything before the first source),
+        // then append our single source + /Fo.
+        // Simple heuristic: split, drop last sourceCount tokens, append ours.
+        var parts = SplitCommandLine(batchedCmdLine);
+        if (parts.Count <= sourceCount) return batchedCmdLine; // can't split
+        var flags = parts.Take(parts.Count - sourceCount);
+        return string.Join(" ", flags) + $" /Fo\"{absObj}\" \"{absSource}\"";
+    }
+
+    /// Crude command-line splitter that respects double quotes.
+    static List<string> SplitCommandLine(string cmdLine)
+    {
+        var result = new List<string>();
+        var sb = new System.Text.StringBuilder();
+        bool inQuote = false;
+        foreach (var ch in cmdLine)
+        {
+            if (ch == '"') { inQuote = !inQuote; sb.Append(ch); }
+            else if (ch == ' ' && !inQuote)
+            {
+                if (sb.Length > 0) { result.Add(sb.ToString()); sb.Clear(); }
+            }
+            else sb.Append(ch);
+        }
+        if (sb.Length > 0) result.Add(sb.ToString());
+        return result;
+    }
+
     static string ResolveAbsolute(string baseDir, string path)
     {
         if (Path.IsPathRooted(path)) return Path.GetFullPath(path);
@@ -1517,7 +1755,8 @@ class GraphCache
             Commands = graph.Commands.Values.Select(c => new CachedCommand
             {
                 Id = c.Id, Tool = c.Tool, Project = c.Project, Target = c.Target,
-                Inputs = c.Inputs, Outputs = c.Outputs
+                Inputs = c.Inputs, Outputs = c.Outputs,
+                CommandLine = c.CommandLine, WorkingDir = c.WorkingDir
             }).ToList()
         };
         File.WriteAllText(path, JsonSerializer.Serialize(cache, JsonOpts));
@@ -1533,7 +1772,7 @@ class GraphCache
             graph.Files.TryAdd(f.Path, new FileNode(f.Path, (FileKind)f.Kind));
         foreach (var c in Commands)
         {
-            var cmd = new CommandNode(c.Id, c.Tool, c.Project, c.Target, c.Inputs, c.Outputs);
+            var cmd = new CommandNode(c.Id, c.Tool, c.Project, c.Target, c.Inputs, c.Outputs, c.CommandLine, c.WorkingDir);
             graph.Commands[cmd.Id] = cmd;
             foreach (var input in cmd.Inputs)
                 graph.AddConsumer(input, cmd.Id);
@@ -1558,4 +1797,6 @@ class CachedCommand
     public string Target { get; set; } = "";
     public List<string> Inputs { get; set; } = [];
     public List<string> Outputs { get; set; } = [];
+    public string CommandLine { get; set; } = "";
+    public string WorkingDir { get; set; } = "";
 }
