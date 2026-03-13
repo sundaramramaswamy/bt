@@ -752,6 +752,52 @@ class BuildGraph
             graph.FileToProducer[outRel] = cmdId;
         }
 
+        // AppxPackageRecipe: WinAppSdkGenerateAppxPackageRecipe
+        // Gathers payload (.exe, .winmd, .pri, AppxManifest, assets) → .build.appxrecipe
+        // We connect only payload items already tracked in the graph as inputs.
+        foreach (var recipeTask in build.FindChildrenRecursive<MSTask>(
+            t => t.Name == "WinAppSdkGenerateAppxPackageRecipe"))
+        {
+            var projNode6 = recipeTask.GetNearestParent<Project>();
+            var proj6 = projNode6?.Name ?? "unknown";
+            var projDir6 = projNode6?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(projNode6.ProjectFile)) ?? ""
+                : "";
+            var pf6 = recipeTask.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            if (pf6 == null) continue;
+
+            var recipeFile = pf6.FindChildrenRecursive<Property>(p => p.Name == "RecipeFile")
+                .FirstOrDefault()?.Value;
+            if (recipeFile == null) continue;
+
+            var recipeRel = graph.ToRelative(ResolveAbsolute(projDir6, recipeFile));
+
+            // Gather inputs: AppxManifestXml + PayloadFiles that are already in the graph
+            var inputs = new List<string>();
+            var manifest = pf6.FindChildrenRecursive<Property>(p => p.Name == "AppxManifestXml")
+                .FirstOrDefault()?.Value;
+            if (manifest != null)
+            {
+                var mRel = graph.ToRelative(ResolveAbsolute(projDir6, manifest));
+                if (graph.Files.ContainsKey(mRel)) inputs.Add(mRel);
+            }
+            var payload = pf6.FindChildrenRecursive<Parameter>(p => p.Name == "PayloadFiles")
+                .FirstOrDefault()?.Children.OfType<Item>().ToList() ?? [];
+            foreach (var item in payload)
+            {
+                var rel = graph.ToRelative(ResolveAbsolute(projDir6, item.Text));
+                if (graph.Files.ContainsKey(rel)) inputs.Add(rel);
+            }
+
+            var target6 = recipeTask.GetNearestParent<Target>()?.Name ?? "unknown";
+            var cmdId = $"AppxRecipe#{cmdIndex++}:{proj6}/{target6}";
+            var cmd = new CommandNode(cmdId, "AppxRecipe", proj6, target6, inputs, [recipeRel]);
+            graph.Commands[cmdId] = cmd;
+            foreach (var inp in inputs) graph.AddConsumer(inp, cmdId);
+            graph.Files.TryAdd(recipeRel, new FileNode(recipeRel, FileKinds.Classify(recipeRel)));
+            graph.FileToProducer[recipeRel] = cmdId;
+        }
+
         return graph;
     }
 
