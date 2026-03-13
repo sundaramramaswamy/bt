@@ -15,6 +15,12 @@ colorOption.AcceptOnlyFromAmong("auto", "always", "never");
 
 // -- Subcommands --
 var graphCmd = new Command("graph", "Emit Graphviz DOT dependency graph");
+var graphFileOption = new Option<string[]>("--file") { Description = "Filter graph to subgraph reachable from/to these files", Arity = ArgumentArity.OneOrMore };
+graphFileOption.Aliases.Add("-f");
+var graphProjectOption = new Option<string[]>("--project") { Description = "Filter graph to nodes belonging to these projects", Arity = ArgumentArity.OneOrMore };
+graphProjectOption.Aliases.Add("-p");
+graphCmd.Add(graphFileOption);
+graphCmd.Add(graphProjectOption);
 
 var outputsFilesArg = new Argument<string[]>("files") { Description = "Source files to query", Arity = ArgumentArity.OneOrMore };
 var outputsOfCmd = new Command("outputs-of", "What outputs get built when <file> changes?");
@@ -35,7 +41,9 @@ root.Add(sourcesOfCmd);
 graphCmd.SetAction(result =>
 {
     var g = Setup(result);
-    return ShowGraph(g);
+    var filterFiles = result.GetValue(graphFileOption);
+    var filterProjects = result.GetValue(graphProjectOption);
+    return ShowGraph(g, filterFiles, filterProjects);
 });
 
 outputsOfCmd.SetAction(result =>
@@ -73,18 +81,67 @@ BuildGraph Setup(ParseResult result)
 // Commands
 // ============================================================
 
-static int ShowGraph(BuildGraph g)
+static int ShowGraph(BuildGraph g, string[]? filterFiles, string[]? filterProjects)
 {
+    // Compute the set of allowed nodes when filters are active.
+    HashSet<string>? allowed = null;
+
+    if (filterFiles is { Length: > 0 })
+    {
+        allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var arg in filterFiles)
+        {
+            var resolved = ResolveFileArg(g, arg);
+            if (resolved == null) continue;
+            // Include everything reachable forward and backward (all intermediate nodes too)
+            foreach (var r in g.GetReachable(resolved)) allowed.Add(r);
+        }
+        if (allowed.Count == 0) { Console.Error.WriteLine("No matching files in graph."); return 1; }
+    }
+
+    if (filterProjects is { Length: > 0 })
+    {
+        // Match projects by name, ignoring .vcxproj/.csproj extensions.
+        // "XaBench" matches "XaBench.vcxproj".
+        var allProjects = g.Commands.Values.Select(c => c.Project).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var matchedProjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var filter in filterProjects)
+            foreach (var p in allProjects)
+                if (p.Equals(filter, StringComparison.OrdinalIgnoreCase)
+                    || Path.GetFileNameWithoutExtension(p).Equals(filter, StringComparison.OrdinalIgnoreCase))
+                    matchedProjects.Add(p);
+
+        var projFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cmd in g.Commands.Values)
+        {
+            if (!matchedProjects.Contains(cmd.Project)) continue;
+            foreach (var i in cmd.Inputs) projFiles.Add(i);
+            foreach (var o in cmd.Outputs) projFiles.Add(o);
+        }
+        if (projFiles.Count == 0)
+        {
+            Console.Error.WriteLine($"No commands found for project(s): {string.Join(", ", filterProjects)}");
+            Console.Error.WriteLine("Available projects:");
+            foreach (var p in allProjects.Where(p => !string.IsNullOrEmpty(p)).OrderBy(p => p))
+                Console.Error.WriteLine($"  {Path.GetFileNameWithoutExtension(p)}");
+            return 1;
+        }
+        allowed = allowed == null ? projFiles : new HashSet<string>(allowed.Intersect(projFiles, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+    }
+
     // Developer-centric graph: sources, intermediates (.obj), and outputs are visible.
     // Only hidden intermediates (.pch, .res) are collapsed — edges skip through them.
-    var visible = g.Files.Values.Where(f => FileKinds.IsDevVisible(f.Kind)).ToList();
+    var visible = g.Files.Values
+        .Where(f => FileKinds.IsDevVisible(f.Kind) && (allowed == null || allowed.Contains(f.Path)))
+        .ToList();
 
     // Walk forward from each visible file to its nearest visible outputs.
     // Returns edges as (source, tool, output) triples.
     var edges = new HashSet<(string src, string tool, string output)>();
     foreach (var f in visible)
         foreach (var (tool, output) in g.GetNearestVisibleEdgesFrom(f.Path))
-            edges.Add((f.Path, tool, output));
+            if (allowed == null || allowed.Contains(output))
+                edges.Add((f.Path, tool, output));
 
     Console.WriteLine("digraph build {");
     Console.WriteLine("  rankdir=LR;");
@@ -120,6 +177,9 @@ static int ShowGraph(BuildGraph g)
         Console.WriteLine($"  {Dot.Id(s)} -> {Dot.Id(o)} [label=\"{Dot.Escape(tool)}\"];");
 
     Console.WriteLine("}");
+
+    if (allowed != null)
+        Console.Error.WriteLine($"{Clr.Dim}Filter: {nodeSet.Count} nodes, {edges.Count} edges{Clr.Reset}");
     return 0;
 }
 
@@ -434,6 +494,38 @@ class BuildGraph
         if (!Commands.TryGetValue(producerId, out var cmd)) return;
         foreach (var input in cmd.Inputs)
             WalkBackward(input, visited, sources);
+    }
+
+    /// Get all files reachable from the given file, both forward and backward.
+    /// Unlike GetOutputsOf/GetSourcesOf, this returns EVERY node on the path,
+    /// not just endpoints. Used for graph filtering.
+    public HashSet<string> GetReachable(string filePath)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectForward(filePath, result);
+        CollectBackward(filePath, result);
+        return result;
+    }
+
+    void CollectForward(string filePath, HashSet<string> visited)
+    {
+        if (!visited.Add(filePath)) return;
+        if (!FileToConsumers.TryGetValue(filePath, out var consumerIds)) return;
+        foreach (var cmdId in consumerIds)
+        {
+            if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+            foreach (var output in cmd.Outputs)
+                CollectForward(output, visited);
+        }
+    }
+
+    void CollectBackward(string filePath, HashSet<string> visited)
+    {
+        if (!visited.Add(filePath)) return;
+        if (!FileToProducer.TryGetValue(filePath, out var producerId)) return;
+        if (!Commands.TryGetValue(producerId, out var cmd)) return;
+        foreach (var input in cmd.Inputs)
+            CollectBackward(input, visited);
     }
 
     // --- Factory ---
