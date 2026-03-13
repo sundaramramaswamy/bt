@@ -408,6 +408,10 @@ class BuildGraph
 
         // Track CL command IDs per project so we can wire headers to them later.
         var clCmdsByProject = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        // Track CL command by absolute source path (for tlog matching — tlogs use absolute uppercase paths).
+        var clCmdByAbsSource = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Track intermediate output dirs per project (for discovering tlog directories).
+        var objDirsByProject = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name is "CL" or "Link" or "Lib" or "MIDL"))
         {
@@ -437,6 +441,7 @@ class BuildGraph
                 var objDir = pf.FindChildrenRecursive<Property>(p => p.Name == "ObjectFileName")
                     .FirstOrDefault()?.Value ?? "";
                 var absObjDir = ResolveAbsolute(projDir, objDir);
+                objDirsByProject.TryAdd(proj, absObjDir);
 
                 foreach (var src in sources)
                 {
@@ -449,6 +454,10 @@ class BuildGraph
                     graph.Files.TryAdd(obj, new FileNode(obj, FileKinds.Classify(obj)));
                     graph.AddConsumer(src, cmdId);
                     graph.FileToProducer[obj] = cmdId;
+
+                    // Record absolute source path for tlog matching
+                    var absSrc = Path.GetFullPath(Path.Combine(graph.RootDir, src));
+                    clCmdByAbsSource.TryAdd(absSrc, cmdId);
 
                     if (!clCmdsByProject.TryGetValue(proj, out var projCmds))
                     {
@@ -501,31 +510,35 @@ class BuildGraph
             }
         }
 
-        // Wire ClInclude headers into the graph (conservative: each header feeds
-        // every CL command in its project, since the binlog doesn't track per-source
-        // include dependencies — tlog refinement can narrow this later).
-        // ClInclude items live under ProjectEvaluation, not Project.
-        foreach (var addItem in build.FindChildrenRecursive<AddItem>(ai => ai.Name == "ClInclude"))
+        // Wire header dependencies: prefer precise tlog data, fall back to
+        // conservative ClInclude if tlogs are missing.
+        var tlogWired = WireTlogHeaders(graph, objDirsByProject, clCmdByAbsSource);
+        if (!tlogWired)
         {
-            var eval = addItem.GetNearestParent<ProjectEvaluation>();
-            var proj = eval?.Name ?? "unknown";
-            var projDir = eval?.ProjectFile != null
-                ? Path.GetDirectoryName(Path.GetFullPath(eval.ProjectFile)) ?? ""
-                : "";
-
-            if (!clCmdsByProject.TryGetValue(proj, out var projCmds)) continue;
-
-            foreach (var item in addItem.Children.OfType<Item>())
+            Console.Error.WriteLine($"{Clr.Yellow}warning:{Clr.Reset} tlog files not found; using conservative ClInclude header tracking");
+            // Conservative fallback: each ClInclude header feeds every CL
+            // command in its project.
+            foreach (var addItem in build.FindChildrenRecursive<AddItem>(ai => ai.Name == "ClInclude"))
             {
-                var headerPath = graph.ToRelative(ResolveAbsolute(projDir, item.Text));
-                graph.Files.TryAdd(headerPath, new FileNode(headerPath, FileKinds.Classify(headerPath)));
+                var eval = addItem.GetNearestParent<ProjectEvaluation>();
+                var proj = eval?.Name ?? "unknown";
+                var projDir2 = eval?.ProjectFile != null
+                    ? Path.GetDirectoryName(Path.GetFullPath(eval.ProjectFile)) ?? ""
+                    : "";
 
-                foreach (var cmdId in projCmds)
+                if (!clCmdsByProject.TryGetValue(proj, out var projCmds)) continue;
+
+                foreach (var item in addItem.Children.OfType<Item>())
                 {
-                    graph.AddConsumer(headerPath, cmdId);
-                    // Also add header to the command's Inputs list
-                    if (graph.Commands.TryGetValue(cmdId, out var cmd) && !cmd.Inputs.Contains(headerPath, StringComparer.OrdinalIgnoreCase))
-                        cmd.Inputs.Add(headerPath);
+                    var headerPath = graph.ToRelative(ResolveAbsolute(projDir2, item.Text));
+                    graph.Files.TryAdd(headerPath, new FileNode(headerPath, FileKinds.Classify(headerPath)));
+
+                    foreach (var cmdId in projCmds)
+                    {
+                        graph.AddConsumer(headerPath, cmdId);
+                        if (graph.Commands.TryGetValue(cmdId, out var cmd) && !cmd.Inputs.Contains(headerPath, StringComparer.OrdinalIgnoreCase))
+                            cmd.Inputs.Add(headerPath);
+                    }
                 }
             }
         }
@@ -855,6 +868,76 @@ class BuildGraph
 
 
         return graph;
+    }
+
+    /// Parse CL.read.1.tlog files to wire precise header → source dependencies.
+    /// Returns true if at least one tlog was found and parsed.
+    static bool WireTlogHeaders(BuildGraph graph,
+        Dictionary<string, string> objDirsByProject,
+        Dictionary<string, string> clCmdByAbsSource)
+    {
+        bool foundAny = false;
+
+        foreach (var (proj, absObjDir) in objDirsByProject)
+        {
+            // Find *.tlog subdirectories under the obj dir
+            if (!Directory.Exists(absObjDir)) continue;
+            var tlogDirs = Directory.GetDirectories(absObjDir, "*.tlog");
+            if (tlogDirs.Length == 0)
+            {
+                // tlog might be one level up (e.g., XaBench\ARM64\Debug\XaBench.tlog)
+                var parent = Path.GetDirectoryName(absObjDir);
+                if (parent != null) tlogDirs = Directory.GetDirectories(parent, "*.tlog");
+            }
+
+            foreach (var tlogDir in tlogDirs)
+            {
+                var readTlog = Path.Combine(tlogDir, "CL.read.1.tlog");
+                if (!File.Exists(readTlog)) continue;
+                foundAny = true;
+
+                // Parse: lines starting with ^ are source files (absolute, uppercase).
+                // Subsequent lines are files that source reads (includes).
+                string? currentCmdId = null;
+                foreach (var line in File.ReadLines(readTlog))
+                {
+                    if (line.StartsWith('^'))
+                    {
+                        // Source file — look up the CL command for it
+                        var absSource = line[1..];
+                        clCmdByAbsSource.TryGetValue(absSource, out currentCmdId);
+                        continue;
+                    }
+
+                    if (currentCmdId == null) continue;
+
+                    // Only track headers under the solution root
+                    if (!line.StartsWith(graph.RootDir, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var headerRel = graph.ToRelative(line);
+                    // Skip non-header files (e.g., .pch, .nls) and the source itself
+                    var ext = Path.GetExtension(headerRel);
+                    if (!IsHeader(ext) && !IsGeneratedSource(ext)) continue;
+
+                    graph.Files.TryAdd(headerRel, new FileNode(headerRel, FileKinds.Classify(headerRel)));
+                    graph.AddConsumer(headerRel, currentCmdId);
+                    if (graph.Commands.TryGetValue(currentCmdId, out var cmd)
+                        && !cmd.Inputs.Contains(headerRel, StringComparer.OrdinalIgnoreCase))
+                        cmd.Inputs.Add(headerRel);
+                }
+            }
+        }
+
+        return foundAny;
+
+        static bool IsHeader(string ext) =>
+            ext.Equals(".h", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".hpp", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".hxx", StringComparison.OrdinalIgnoreCase);
+
+        // .g.h, .g.cpp files produced by cppwinrt are #included by some sources
+        static bool IsGeneratedSource(string ext) =>
+            ext.Equals(".cpp", StringComparison.OrdinalIgnoreCase);
     }
 
     /// Resolve a potentially relative path to absolute using a base directory.
