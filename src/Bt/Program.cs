@@ -265,9 +265,54 @@ class BuildGraph
     public string ToAbsolute(string relativePath) =>
         Path.GetFullPath(Path.Combine(RootDir, relativePath));
 
-    /// Convert an absolute path to root-relative.
-    public string ToRelative(string absolutePath) =>
-        Path.GetRelativePath(RootDir, absolutePath);
+    /// Convert an absolute path to root-relative, normalizing casing.
+    /// Prefers the case-normalization cache (seeded from binlog paths) over filesystem.
+    public string ToRelative(string absolutePath)
+    {
+        var full = Path.GetFullPath(absolutePath);
+        if (_caseCache.TryGetValue(full, out var cached)) return cached;
+        // For paths not in cache (e.g., headers from tlog), resolve actual
+        // casing from the filesystem. This is slower but only hits for
+        // tlog-discovered paths not already in the binlog.
+        if (File.Exists(full) || Directory.Exists(full))
+            full = GetActualCasePath(full);
+        var rel = Path.GetRelativePath(RootDir, full);
+        _caseCache[full] = rel;
+        return rel;
+    }
+
+    /// Seed the case cache from all paths already in the graph (binlog-derived,
+    /// correct casing). Call this before parsing tlog files so their ALLCAPS
+    /// paths resolve via cache instead of filesystem lookups.
+    public void SeedCaseCache()
+    {
+        foreach (var rel in Files.Keys)
+        {
+            var abs = Path.GetFullPath(Path.Combine(RootDir, rel));
+            _caseCache[abs] = rel;  // OrdinalIgnoreCase key → correct-case value
+        }
+    }
+
+    readonly Dictionary<string, string> _caseCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// Add a single entry to the case cache (e.g., from ClInclude with correct casing).
+    public void PrimeCaseCacheEntry(string absolutePath, string relativePath)
+        => _caseCache.TryAdd(absolutePath, relativePath);
+
+    /// Walk path segments and resolve actual casing from the filesystem.
+    static string GetActualCasePath(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (root == null) return path;
+        var result = root.ToUpperInvariant().TrimEnd('\\');
+        var rest = path[root.Length..];
+        foreach (var segment in rest.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var match = Directory.EnumerateFileSystemEntries(result, segment).FirstOrDefault();
+            result = match ?? Path.Combine(result, segment);
+        }
+        return result;
+    }
 
     /// Given a source file, find all final outputs reachable through the graph.
     public HashSet<string> GetOutputsOf(string sourcePath)
@@ -512,6 +557,21 @@ class BuildGraph
 
         // Wire header dependencies: prefer precise tlog data, fall back to
         // conservative ClInclude if tlogs are missing.
+        // Seed case cache: graph.Files (binlog-derived) + ClInclude items (correct casing).
+        // This avoids filesystem lookups for tlog ALLCAPS paths.
+        graph.SeedCaseCache();
+        foreach (var addItem in build.FindChildrenRecursive<AddItem>(ai => ai.Name == "ClInclude"))
+        {
+            var eval = addItem.GetNearestParent<ProjectEvaluation>();
+            var pd = eval?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(eval.ProjectFile)) ?? "" : "";
+            foreach (var item in addItem.Children.OfType<Item>())
+            {
+                var abs = ResolveAbsolute(pd, item.Text);
+                var rel = Path.GetRelativePath(graph.RootDir, abs);
+                graph.PrimeCaseCacheEntry(abs, rel);
+            }
+        }
         var tlogWired = WireTlogHeaders(graph, objDirsByProject, clCmdByAbsSource);
         if (!tlogWired)
         {
