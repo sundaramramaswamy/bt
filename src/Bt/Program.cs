@@ -1553,7 +1553,15 @@ class BuildGraph
             var priRel = graph.ToRelative(ResolveAbsolute(projDir4, outFile));
             var target4 = priTask.GetNearestParent<Target>()?.Name ?? "unknown";
             var cmdId = $"makepri#{cmdIndex++}:{proj4}/{target4}";
-            var cmd = new CommandNode(cmdId, "makepri", proj4, target4, [], [priRel]);
+            // CommandLineArguments is a child property of the task (like CL/Link)
+            var priCmdLine = (priTask.FindChildrenRecursive<Property>(
+                p => p.Name == "CommandLineArguments").FirstOrDefault()?.Value ?? "")
+                .ReplaceLineEndings(" ").Trim();
+            var cmd = new CommandNode(cmdId, "makepri", proj4, target4, [], [priRel])
+            {
+                CommandLine = priCmdLine,
+                WorkingDir = projDir4
+            };
             graph.Commands[cmdId] = cmd;
             graph.Files.TryAdd(priRel, new FileNode(priRel, FileKinds.Classify(priRel)));
             graph.FileToProducer[priRel] = cmdId;
