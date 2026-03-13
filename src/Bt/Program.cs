@@ -191,7 +191,7 @@ static class FileKinds
     static readonly HashSet<string> HeaderExts = new(StringComparer.OrdinalIgnoreCase)
         { ".h", ".hpp", ".hxx" };
     static readonly HashSet<string> OutputExts = new(StringComparer.OrdinalIgnoreCase)
-        { ".exe", ".dll", ".lib", ".winmd" };
+        { ".exe", ".dll", ".lib", ".winmd", ".xbf" };
     static readonly HashSet<string> IntermediateExts = new(StringComparer.OrdinalIgnoreCase)
         { ".obj", ".pch", ".res" };
 
@@ -272,8 +272,11 @@ class BuildGraph
 
         if (!FileToConsumers.TryGetValue(filePath, out var consumerIds))
         {
-            // Leaf: no command consumes this file → it's a final output
-            if (Files.TryGetValue(filePath, out var f) && f.Kind != FileKind.Source)
+            // Leaf: no command consumes this file → it's a final output.
+            // Generated sources (.g.h, .g.cpp) have Source kind but ARE outputs
+            // of a command, so include them too.
+            if (Files.TryGetValue(filePath, out var f)
+                && (f.Kind != FileKind.Source || FileToProducer.ContainsKey(filePath)))
                 outputs.Add(filePath);
             return;
         }
@@ -437,6 +440,90 @@ class BuildGraph
                     // Also add header to the command's Inputs list
                     if (graph.Commands.TryGetValue(cmdId, out var cmd) && !cmd.Inputs.Contains(headerPath, StringComparer.OrdinalIgnoreCase))
                         cmd.Inputs.Add(headerPath);
+                }
+            }
+        }
+
+        // CompileXaml: .xaml → generated .xaml.g.h, .g.cpp, .xbf
+        // Structured in the binlog: XamlPages/XamlApplications as inputs,
+        // _GeneratedCodeFiles/_GeneratedXbfFiles as outputs.
+        foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name == "CompileXaml"))
+        {
+            var projNode = task.GetNearestParent<Project>();
+            var proj = projNode?.Name ?? "unknown";
+            var projDir = projNode?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(projNode.ProjectFile)) ?? ""
+                : "";
+            var target = task.GetNearestParent<Target>()?.Name ?? "unknown";
+            var pf = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            if (pf == null) continue;
+
+            // Gather input .xaml files
+            var xamlInputs = new List<string>();
+            foreach (var paramName in new[] { "XamlPages", "XamlApplications" })
+            {
+                var items = pf.Children.OfType<Parameter>()
+                    .FirstOrDefault(p => p.Name == paramName)
+                    ?.Children.OfType<Item>()
+                    .Select(i => graph.ToRelative(ResolveAbsolute(projDir, i.Text)));
+                if (items != null) xamlInputs.AddRange(items);
+            }
+            if (xamlInputs.Count == 0) continue;
+
+            // Gather output files from OutputItems
+            var of = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "OutputItems");
+            var xamlOutputs = new List<string>();
+            if (of != null)
+            {
+                foreach (var paramName in new[] { "_GeneratedCodeFiles", "_GeneratedXbfFiles" })
+                {
+                    var items = of.Children.OfType<NamedNode>()
+                        .Where(n => n.Name == paramName)
+                        .SelectMany(n => n.Children.OfType<Item>())
+                        .Select(i => graph.ToRelative(ResolveAbsolute(projDir, i.Text)));
+                    xamlOutputs.AddRange(items);
+                }
+            }
+            if (xamlOutputs.Count == 0) continue;
+
+            var cmdId = $"CompileXaml#{cmdIndex++}:{proj}/{target}";
+            var cmd = new CommandNode(cmdId, "CompileXaml", proj, target, xamlInputs, xamlOutputs);
+            graph.Commands[cmdId] = cmd;
+
+            foreach (var input in xamlInputs)
+            {
+                graph.Files.TryAdd(input, new FileNode(input, FileKinds.Classify(input)));
+                graph.AddConsumer(input, cmdId);
+            }
+            foreach (var output in xamlOutputs)
+            {
+                graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
+                graph.FileToProducer.TryAdd(output, cmdId);
+            }
+        }
+
+        // Convention: cppwinrt generates .g.h/.g.cpp from .winmd produced by MIDL.
+        // The cppwinrt step is an unstructured Exec task, so we infer outputs by
+        // naming convention: {name}.idl → MIDL → {name}.winmd, and cppwinrt
+        // produces Generated Files\{name}.g.h + .g.cpp in the same project dir.
+        foreach (var cmd in graph.Commands.Values.Where(c => c.Tool == "MIDL").ToList())
+        {
+            var projDir2 = build.FindChildrenRecursive<Project>(p => p.Name == cmd.Project)
+                .FirstOrDefault()?.ProjectFile;
+            if (projDir2 == null) continue;
+            var absDir = Path.GetDirectoryName(Path.GetFullPath(projDir2)) ?? "";
+
+            foreach (var idlPath in cmd.Inputs)
+            {
+                var stem = Path.GetFileNameWithoutExtension(idlPath);
+                foreach (var ext in new[] { ".g.h", ".g.cpp" })
+                {
+                    var genPath = Path.Combine(absDir, "Generated Files", stem + ext);
+                    if (!File.Exists(genPath)) continue;
+                    var rel = graph.ToRelative(genPath);
+                    graph.Files.TryAdd(rel, new FileNode(rel, FileKinds.Classify(rel)));
+                    cmd.Outputs.Add(rel);
+                    graph.FileToProducer.TryAdd(rel, cmd.Id);
                 }
             }
         }
