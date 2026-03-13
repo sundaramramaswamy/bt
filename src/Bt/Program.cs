@@ -9,18 +9,33 @@ if (args.Length == 0 || args[0] is "-h" or "--help")
     return 0;
 }
 
-// Optional --binlog <path> before the subcommand
+// Parse global flags before the subcommand
 var binlogPath = Path.GetFullPath("msbuild.binlog");
 int cmdStart = 0;
-if (args[0] == "--binlog" && args.Length >= 2)
+while (cmdStart < args.Length && args[cmdStart].StartsWith('-'))
 {
-    binlogPath = Path.GetFullPath(args[1]);
-    cmdStart = 2;
-}
-else if (args[0].StartsWith("--binlog="))
-{
-    binlogPath = Path.GetFullPath(args[0]["--binlog=".Length..]);
-    cmdStart = 1;
+    var a = args[cmdStart];
+    if (a == "--binlog" && cmdStart + 1 < args.Length)
+    {
+        binlogPath = Path.GetFullPath(args[++cmdStart]);
+        cmdStart++;
+    }
+    else if (a.StartsWith("--binlog="))
+    {
+        binlogPath = Path.GetFullPath(a["--binlog=".Length..]);
+        cmdStart++;
+    }
+    else if (a is "--color" or "--colour" && cmdStart + 1 < args.Length)
+    {
+        Clr.SetMode(args[++cmdStart]);
+        cmdStart++;
+    }
+    else if (a.StartsWith("--color=") || a.StartsWith("--colour="))
+    {
+        Clr.SetMode(a[(a.IndexOf('=') + 1)..]);
+        cmdStart++;
+    }
+    else break;
 }
 
 if (cmdStart >= args.Length)
@@ -165,10 +180,11 @@ static void PrintUsage()
     Console.WriteLine($"""
     {Clr.Bold}bt{Clr.Reset} — MSBuild dependency graph explorer
 
-    {Clr.Bold}Usage:{Clr.Reset}  bt [--binlog <path>] <command> [args]
+    {Clr.Bold}Usage:{Clr.Reset}  bt [options] <command> [args]
 
     {Clr.Bold}Options:{Clr.Reset}
       --binlog <path>       Path to .binlog file (default: msbuild.binlog)
+      --color <when>        Coloured output: auto, always, never (default: auto)
 
     {Clr.Bold}Commands:{Clr.Reset}
       {Clr.Cyan}graph{Clr.Reset}                 Emit Graphviz DOT dependency graph
@@ -477,10 +493,17 @@ static class Dot
         label.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }
 
-/// ANSI colour helpers — disable automatically when stdout is redirected.
+/// ANSI colour helpers — respects --color auto|always|never.
 static class Clr
 {
-    static readonly bool _enabled = !Console.IsOutputRedirected;
+    static bool _enabled = !Console.IsOutputRedirected;
+
+    public static void SetMode(string mode) => _enabled = mode switch
+    {
+        "always" => true,
+        "never"  => false,
+        _        => !Console.IsOutputRedirected   // "auto"
+    };
 
     public static string Reset   => _enabled ? "\x1b[0m"  : "";
     public static string Bold    => _enabled ? "\x1b[1m"  : "";
