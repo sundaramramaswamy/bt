@@ -95,6 +95,13 @@ static int ShowGraph(BuildGraph g)
     var nodeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     foreach (var (s, _, o) in edges) { nodeSet.Add(s); nodeSet.Add(o); }
 
+    // Include visible nodes that are produced (have a command) but have no
+    // consumers — these are terminal outputs like .pri that the walk won't reach.
+    foreach (var f in visible)
+        if (g.FileToProducer.ContainsKey(f.Path)
+            && !g.FileToConsumers.ContainsKey(f.Path))
+            nodeSet.Add(f.Path);
+
     foreach (var path in nodeSet)
     {
         if (!g.Files.TryGetValue(path, out var f)) continue;
@@ -205,7 +212,7 @@ static class FileKinds
     static readonly HashSet<string> HeaderExts = new(StringComparer.OrdinalIgnoreCase)
         { ".h", ".hpp", ".hxx" };
     static readonly HashSet<string> OutputExts = new(StringComparer.OrdinalIgnoreCase)
-        { ".exe", ".dll", ".lib", ".winmd", ".xbf", ".obj" };
+        { ".exe", ".dll", ".lib", ".winmd", ".xbf", ".obj", ".pri" };
     static readonly HashSet<string> IntermediateExts = new(StringComparer.OrdinalIgnoreCase)
         { ".pch", ".res" };
 
@@ -683,6 +690,31 @@ class BuildGraph
                 graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
                 graph.FileToProducer[output] = cmdId;
             }
+        }
+
+        // makepri: WinAppSdkGenerateProjectPriFile → resources.pri
+        // The task indexes the whole project directory; we model it as a no-input
+        // command producing .pri so it appears as a terminal node in the graph.
+        foreach (var priTask in build.FindChildrenRecursive<MSTask>(
+            t => t.Name == "WinAppSdkGenerateProjectPriFile"))
+        {
+            var projNode4 = priTask.GetNearestParent<Project>();
+            var proj4 = projNode4?.Name ?? "unknown";
+            var projDir4 = projNode4?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(projNode4.ProjectFile)) ?? ""
+                : "";
+            var pf4 = priTask.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            var outFile = pf4?.FindChildrenRecursive<Property>(p => p.Name == "OutputFileName")
+                .FirstOrDefault()?.Value;
+            if (outFile == null) continue;
+
+            var priRel = graph.ToRelative(ResolveAbsolute(projDir4, outFile));
+            var target4 = priTask.GetNearestParent<Target>()?.Name ?? "unknown";
+            var cmdId = $"makepri#{cmdIndex++}:{proj4}/{target4}";
+            var cmd = new CommandNode(cmdId, "makepri", proj4, target4, [], [priRel]);
+            graph.Commands[cmdId] = cmd;
+            graph.Files.TryAdd(priRel, new FileNode(priRel, FileKinds.Classify(priRel)));
+            graph.FileToProducer[priRel] = cmdId;
         }
 
         return graph;
