@@ -39,6 +39,42 @@ root.Add(graphCmd);
 root.Add(outputsOfCmd);
 root.Add(sourcesOfCmd);
 
+// Custom coloured help — runs before System.CommandLine's default help
+if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
+{
+    // Only colourize top-level help; let subcommand -? use defaults
+    if (args.Length == 0 || !args.Any(a => a is "graph" or "outs" or "srcs"))
+    {
+        Clr.SetMode("auto");
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt{Clr.Reset} — MSBuild dependency graph explorer
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt [command] [options]
+
+        {Clr.Yellow}Commands:{Clr.Reset}
+          {Clr.Cyan}graph{Clr.Reset}         Emit Graphviz DOT dependency graph
+          {Clr.Cyan}outs{Clr.Reset} <files>  List all downstream files reachable from <file>  (tree)
+          {Clr.Cyan}srcs{Clr.Reset} <files>  List all upstream files that feed into <file>    (tree)
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>    auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Graph filters:{Clr.Reset}
+          {Clr.Green}-f, --file{Clr.Reset} <path>     Subgraph reachable from/to file
+          {Clr.Green}-p, --project{Clr.Reset} <name>  Only nodes from project
+
+        {Clr.Yellow}Examples:{Clr.Reset}
+          {Clr.Dim}bt graph | dot -Tsvg -o build.svg{Clr.Reset}
+          {Clr.Dim}bt graph -f TestDataItem.h{Clr.Reset}
+          {Clr.Dim}bt outs TestDataItem.h{Clr.Reset}
+          {Clr.Dim}bt srcs XaBench.exe{Clr.Reset}
+        """);
+        return 0;
+    }
+}
+
 graphCmd.SetAction(result =>
 {
     var g = Setup(result);
@@ -276,6 +312,9 @@ static void PrintTreeBackward(BuildGraph g, string filePath, string indent, bool
 /// Graph stores root-relative paths; user may pass absolute or partial names.
 static string? ResolveFileArg(BuildGraph g, string arg)
 {
+    // Normalize forward slashes so Unix-style paths work on Windows
+    arg = arg.Replace('/', '\\');
+
     // If user gave an absolute path, convert to root-relative for lookup
     var key = Path.IsPathRooted(arg) ? g.ToRelative(Path.GetFullPath(arg)) : arg;
 
