@@ -724,6 +724,17 @@ class BuildGraph
     // file → command that produces it
     public Dictionary<string, string> FileToProducer { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// External include path prefixes (from CAExcludePath). Files under these
+    /// are SDK/generated headers — excluded from mtime dirty checking.
+    public HashSet<string> ExternalPrefixes { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    // file → synthetic (#include) commands that produce it (1:N, unlike FileToProducer)
+    public Dictionary<string, List<string>> SyntheticProducers { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// Check if a file path is under an external include prefix.
+    public bool IsExternal(string relativePath) =>
+        ExternalPrefixes.Any(p => relativePath.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+
     public void AddConsumer(string filePath, string cmdId)
     {
         if (!FileToConsumers.TryGetValue(filePath, out var list))
@@ -1093,14 +1104,17 @@ class BuildGraph
     }
 
     /// Walk backward through synthetic (#include) commands to collect transitive header inputs.
+    /// Skips external headers (SDK, generated) to avoid false mtime positives.
     void CollectSyntheticSources(string file, HashSet<string> collected)
     {
-        if (!FileToProducer.TryGetValue(file, out var producerId)) return;
-        if (!Commands.TryGetValue(producerId, out var producer)) return;
-        if (!producer.Tool.StartsWith("#")) return; // only follow synthetic edges
-        foreach (var input in producer.Inputs)
-            if (collected.Add(input))
-                CollectSyntheticSources(input, collected);
+        if (!SyntheticProducers.TryGetValue(file, out var cmdIds)) return;
+        foreach (var cmdId in cmdIds)
+        {
+            if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+            foreach (var input in cmd.Inputs)
+                if (!IsExternal(input) && collected.Add(input))
+                    CollectSyntheticSources(input, collected);
+        }
     }
 
     // --- Factory ---
@@ -1117,6 +1131,32 @@ class BuildGraph
 
         var graph = new BuildGraph { RootDir = rootDir };
         int cmdIndex = 0;
+
+        // Extract external include prefixes from CAExcludePath (per-project SetEnv task).
+        // These are SDK/generated directories whose headers we skip in mtime checks.
+        foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name == "SetEnv"))
+        {
+            var pf = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            var name = pf?.FindChildrenRecursive<Property>(p => p.Name == "Name")
+                .FirstOrDefault()?.Value;
+            if (name != "CAExcludePath") continue;
+            var value = pf?.FindChildrenRecursive<Property>(p => p.Name == "Value")
+                .FirstOrDefault()?.Value ?? "";
+            var projNode = task.GetNearestParent<Project>();
+            var projDir = projNode?.ProjectFile != null
+                ? Path.GetDirectoryName(Path.GetFullPath(projNode.ProjectFile)) ?? ""
+                : "";
+            foreach (var dir in value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (dir == "PreventSdkUapPropsAssignment") continue; // not a path
+                // Absolute paths (SDK, toolchain) → convert to root-relative
+                // Relative paths (e.g. "Generated Files\") → prepend project-relative prefix
+                var abs = Path.IsPathRooted(dir) ? dir : Path.GetFullPath(Path.Combine(projDir, dir));
+                var rel = Path.GetRelativePath(rootDir, abs);
+                if (!rel.EndsWith('\\')) rel += '\\';
+                graph.ExternalPrefixes.Add(rel);
+            }
+        }
 
         // Track CL command IDs per project so we can wire headers to them later.
         var clCmdsByProject = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -1694,8 +1734,13 @@ class BuildGraph
                     var cmd = new CommandNode(cmdId, "#include", "", "", [headerRel], [currentSourceRel]);
                     graph.Commands[cmdId] = cmd;
                     graph.AddConsumer(headerRel, cmdId);
-                    // Don't set FileToProducer for the source — it's a real source file,
-                    // not generated. Multiple headers can feed the same source.
+                    // Track in SyntheticProducers (1:N) so mtime walk finds all headers for a source
+                    if (!graph.SyntheticProducers.TryGetValue(currentSourceRel, out var spList))
+                    {
+                        spList = [];
+                        graph.SyntheticProducers[currentSourceRel] = spList;
+                    }
+                    spList.Add(cmdId);
                 }
             }
         }
@@ -1836,6 +1881,7 @@ class GraphCache
     public string RootDir { get; set; } = "";
     public List<CachedFile> Files { get; set; } = [];
     public List<CachedCommand> Commands { get; set; } = [];
+    public List<string> ExternalPrefixes { get; set; } = [];
 
     static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -1849,6 +1895,7 @@ class GraphCache
         {
             BinlogTimestamp = binlogStamp.Ticks,
             RootDir = graph.RootDir,
+            ExternalPrefixes = graph.ExternalPrefixes.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList(),
             Files = graph.Files.Values.Select(f => new CachedFile { Path = f.Path, Kind = (int)f.Kind }).ToList(),
             Commands = graph.Commands.Values.Select(c => new CachedCommand
             {
@@ -1866,6 +1913,8 @@ class GraphCache
     public BuildGraph ToGraph()
     {
         var graph = new BuildGraph { RootDir = RootDir };
+        foreach (var p in ExternalPrefixes)
+            graph.ExternalPrefixes.Add(p);
         foreach (var f in Files)
             graph.Files.TryAdd(f.Path, new FileNode(f.Path, (FileKind)f.Kind));
         foreach (var c in Commands)
@@ -1875,7 +1924,19 @@ class GraphCache
             foreach (var input in cmd.Inputs)
                 graph.AddConsumer(input, cmd.Id);
             foreach (var output in cmd.Outputs)
-                graph.FileToProducer[output] = cmd.Id;
+            {
+                graph.FileToProducer.TryAdd(output, cmd.Id);
+                // Rebuild SyntheticProducers index for #include commands
+                if (cmd.Tool.StartsWith("#"))
+                {
+                    if (!graph.SyntheticProducers.TryGetValue(output, out var spList))
+                    {
+                        spList = [];
+                        graph.SyntheticProducers[output] = spList;
+                    }
+                    spList.Add(cmd.Id);
+                }
+            }
         }
         return graph;
     }
