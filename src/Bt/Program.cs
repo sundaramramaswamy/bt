@@ -45,15 +45,14 @@ return args[cmdStart] switch
 
 static int ShowGraph(BuildGraph g)
 {
-    // Developer-centric graph: only sources and final outputs.
-    // Intermediates (.obj) are collapsed — edges go directly from
-    // source (.cpp, .h, .cs, .idl, .rc) to final output (.exe, .dll, .lib).
-    var sources = g.Files.Values.Where(f => f.Kind == FileKind.Source).ToList();
-    var outputs = g.Files.Values.Where(f => f.Kind == FileKind.Output).ToList();
+    // Developer-centric graph: sources and outputs are visible.
+    // Intermediates (.obj, .pch) are collapsed — edges skip through them.
+    var visible = g.Files.Values.Where(f => FileKinds.IsDevVisible(f.Kind)).ToList();
 
-    // Collect source→output edges by walking through the graph
+    // Walk forward from each source to find which visible outputs it reaches,
+    // and walk backward from each output to find which visible sources feed it.
     var edges = new HashSet<(string src, string output)>();
-    foreach (var src in sources)
+    foreach (var src in visible.Where(f => f.Kind == FileKind.Source))
         foreach (var output in g.GetOutputsOf(src.Path))
             edges.Add((src.Path, output));
 
@@ -62,7 +61,6 @@ static int ShowGraph(BuildGraph g)
     Console.WriteLine("  node [fontname=\"Consolas\" fontsize=10];");
     Console.WriteLine();
 
-    // Only emit nodes that participate in edges
     var nodeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     foreach (var (s, o) in edges) { nodeSet.Add(s); nodeSet.Add(o); }
 
@@ -181,6 +179,29 @@ static void PrintUsage()
 
 enum FileKind { Source, Intermediate, Output }
 
+static class FileKinds
+{
+    static readonly HashSet<string> SourceExts = new(StringComparer.OrdinalIgnoreCase)
+        { ".cpp", ".cc", ".cxx", ".c", ".cs", ".idl", ".xaml", ".rc", ".res" };
+    static readonly HashSet<string> HeaderExts = new(StringComparer.OrdinalIgnoreCase)
+        { ".h", ".hpp", ".hxx" };
+    static readonly HashSet<string> OutputExts = new(StringComparer.OrdinalIgnoreCase)
+        { ".exe", ".dll", ".lib", ".winmd" };
+    static readonly HashSet<string> IntermediateExts = new(StringComparer.OrdinalIgnoreCase)
+        { ".obj", ".pch", ".res" };
+
+    public static FileKind Classify(string path)
+    {
+        var ext = Path.GetExtension(path);
+        if (OutputExts.Contains(ext)) return FileKind.Output;
+        if (IntermediateExts.Contains(ext)) return FileKind.Intermediate;
+        if (SourceExts.Contains(ext) || HeaderExts.Contains(ext)) return FileKind.Source;
+        return FileKind.Intermediate; // unknown → intermediate (hidden from dev graph)
+    }
+
+    public static bool IsDevVisible(FileKind kind) => kind != FileKind.Intermediate;
+}
+
 record FileNode(string Path, FileKind Kind);
 
 record CommandNode(
@@ -267,8 +288,7 @@ class BuildGraph
         if (!FileToProducer.TryGetValue(filePath, out var producerId))
         {
             // Root: no command produces this file → it's a source
-            if (Files.TryGetValue(filePath, out var f) && f.Kind == FileKind.Source)
-                sources.Add(filePath);
+            sources.Add(filePath);
             return;
         }
 
@@ -327,7 +347,7 @@ class BuildGraph
                     var cmdId = $"CL#{cmdIndex++}:{proj}/{target}";
                     var cmd = new CommandNode(cmdId, "CL", proj, target, [src], [obj]);
                     graph.Commands[cmdId] = cmd;
-                    graph.Files.TryAdd(src, new FileNode(src, FileKind.Source));
+                    graph.Files.TryAdd(src, new FileNode(src, FileKinds.Classify(src)));
                     graph.Files.TryAdd(obj, new FileNode(obj, FileKind.Intermediate));
                     graph.AddConsumer(src, cmdId);
                     graph.FileToProducer[obj] = cmdId;
@@ -344,12 +364,12 @@ class BuildGraph
                 var cmdId = $"{toolName}#{cmdIndex++}:{proj}/{target}";
                 var cmd = new CommandNode(cmdId, toolName, proj, target, sources, [outFile]);
                 graph.Commands[cmdId] = cmd;
-                graph.Files.TryAdd(outFile, new FileNode(outFile, FileKind.Output));
+                graph.Files.TryAdd(outFile, new FileNode(outFile, FileKinds.Classify(outFile)));
                 graph.FileToProducer[outFile] = cmdId;
 
                 foreach (var input in sources)
                 {
-                    graph.Files.TryAdd(input, new FileNode(input, FileKind.Intermediate));
+                    graph.Files.TryAdd(input, new FileNode(input, FileKinds.Classify(input)));
                     graph.AddConsumer(input, cmdId);
                 }
             }
