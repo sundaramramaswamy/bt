@@ -29,7 +29,7 @@ msbuild MySolution.sln -bl
 bt bins MyHeader.h            # tree of everything downstream
 bt srcs MyApp.exe             # tree of everything upstream
 bt dirty MyFile.cpp           # build plan for changed file
-bt dirty --git                # build plan from git diff
+bt dirty                      # build plan from git diff
 bt graph -p MyProject         # DOT graph filtered to one project
 bt graph -f MyFile.cpp        # DOT subgraph around one file
 ```
@@ -43,7 +43,7 @@ unless the binlog changes.
 |---------|-------------|
 | `bt bins <files>` | Downstream dependency tree — what rebuilds when `<file>` changes |
 | `bt srcs <files>` | Upstream dependency tree — what sources feed into `<file>` |
-| `bt dirty [files]` | Topo-sorted build plan for changed files (`--git` for auto-detect) |
+| `bt dirty [files]` | Topo-sorted build plan for changed files (default: `git diff`) |
 | `bt graph` | Emit full Graphviz DOT graph (pipe to `dot`, `d2`, etc.) |
 
 ### Graph filters

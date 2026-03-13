@@ -31,11 +31,9 @@ var sourcesFilesArg = new Argument<string[]>("files") { Description = "Output fi
 var sourcesOfCmd = new Command("srcs", "List all upstream files that feed into <file>");
 sourcesOfCmd.Add(sourcesFilesArg);
 
-var affectedFilesArg = new Argument<string[]>("files") { Description = "Changed files", Arity = ArgumentArity.ZeroOrMore };
-var affectedGitOption = new Option<bool>("--git") { Description = "Detect changed files from git (unstaged + staged)" };
+var affectedFilesArg = new Argument<string[]>("files") { Description = "Changed files (default: git diff)", Arity = ArgumentArity.ZeroOrMore };
 var affectedCmd = new Command("dirty", "Build plan for changed files");
 affectedCmd.Add(affectedFilesArg);
-affectedCmd.Add(affectedGitOption);
 
 // -- Wire up --
 var root = new RootCommand("bt — MSBuild dependency graph explorer");
@@ -78,7 +76,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Dim}bt graph -f TestDataItem.h{Clr.Reset}
           {Clr.Dim}bt bins TestDataItem.h{Clr.Reset}
           {Clr.Dim}bt srcs XaBench.exe{Clr.Reset}
-          {Clr.Dim}bt dirty --git{Clr.Reset}
+          {Clr.Dim}bt dirty{Clr.Reset}
           {Clr.Dim}bt dirty src/Foo.cpp src/Bar.h{Clr.Reset}
         """);
         return 0;
@@ -111,8 +109,7 @@ affectedCmd.SetAction(result =>
 {
     var g = Setup(result);
     var explicitFiles = result.GetValue(affectedFilesArg) ?? [];
-    var useGit = result.GetValue(affectedGitOption);
-    return Affected(g, explicitFiles, useGit);
+    return Affected(g, explicitFiles);
 });
 
 return root.Parse(args).Invoke();
@@ -326,11 +323,11 @@ static void PrintTreeBackward(BuildGraph g, string filePath, string indent, bool
     }
 }
 
-static int Affected(BuildGraph g, string[] explicitFiles, bool useGit)
+static int Affected(BuildGraph g, string[] explicitFiles)
 {
-    // Gather changed files
+    // Gather changed files: explicit args, or fall back to git diff
     var changedArgs = new List<string>(explicitFiles);
-    if (useGit || changedArgs.Count == 0)
+    if (changedArgs.Count == 0)
     {
         var gitFiles = GetGitChangedFiles(g.RootDir);
         if (gitFiles == null) return 1; // error printed by helper
@@ -387,14 +384,30 @@ static List<string>? GetGitChangedFiles(string rootDir)
 {
     try
     {
-        var psi = new System.Diagnostics.ProcessStartInfo("git", "diff --name-only HEAD")
+        var psi = new System.Diagnostics.ProcessStartInfo("git", "rev-parse --is-inside-work-tree")
         {
             WorkingDirectory = rootDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
-        using var proc = System.Diagnostics.Process.Start(psi);
+        using var check = System.Diagnostics.Process.Start(psi);
+        check?.WaitForExit();
+        if (check == null || check.ExitCode != 0)
+        {
+            Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} not a git repository. Pass files explicitly: {Clr.Dim}bt dirty file1.cpp file2.h{Clr.Reset}");
+            return null;
+        }
+
+        // Staged changes (vs HEAD)
+        var psi1 = new System.Diagnostics.ProcessStartInfo("git", "diff --name-only HEAD")
+        {
+            WorkingDirectory = rootDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        using var proc = System.Diagnostics.Process.Start(psi1);
         if (proc == null) { Console.Error.WriteLine($"{Clr.Red}Failed to start git{Clr.Reset}"); return null; }
         var output = proc.StandardOutput.ReadToEnd();
         proc.WaitForExit();
@@ -417,6 +430,11 @@ static List<string>? GetGitChangedFiles(string rootDir)
         return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+    catch (System.ComponentModel.Win32Exception)
+    {
+        Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} git not found. Pass files explicitly: {Clr.Dim}bt dirty file1.cpp file2.h{Clr.Reset}");
+        return null;
     }
     catch (Exception ex)
     {
