@@ -45,6 +45,10 @@ buildCmd.Add(buildFilesArg);
 buildCmd.Add(buildJobsOption);
 buildCmd.Add(buildDryRunOption);
 
+var compileCommandsOutputOption = new Option<string>("-o") { Description = "Output file (default: compile_commands.json in repo root)" };
+var compileCommandsCmd = new Command("compiledb", "Generate compile_commands.json for clangd/clang-tidy");
+compileCommandsCmd.Add(compileCommandsOutputOption);
+
 // -- Wire up --
 var root = new RootCommand("bt — MSBuild dependency graph explorer");
 root.Add(binlogOption);
@@ -54,12 +58,13 @@ root.Add(outputsOfCmd);
 root.Add(sourcesOfCmd);
 root.Add(affectedCmd);
 root.Add(buildCmd);
+root.Add(compileCommandsCmd);
 
 // Custom coloured help — runs before System.CommandLine's default help
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
-    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build"))
+    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb"))
     {
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
@@ -74,6 +79,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Cyan}srcs{Clr.Reset} <files>       Upstream dependency tree
           {Clr.Cyan}dirty{Clr.Reset} [files]      Build plan (mtime-based, or explicit files)
           {Clr.Cyan}build{Clr.Reset} [files]      Build only what's dirty (-j N, --dry-run)
+          {Clr.Cyan}compiledb{Clr.Reset}          Generate compile_commands.json (-o path)
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
@@ -93,6 +99,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Dim}bt build{Clr.Reset}
           {Clr.Dim}bt build -j 4 src/Foo.cpp{Clr.Reset}
           {Clr.Dim}bt build --dry-run{Clr.Reset}
+          {Clr.Dim}bt compiledb{Clr.Reset}
         """);
         return 0;
     }
@@ -134,6 +141,13 @@ buildCmd.SetAction(result =>
     var maxJobs = result.GetValue(buildJobsOption);
     var dryRun = result.GetValue(buildDryRunOption);
     return RunBuild(g, explicitFiles, maxJobs, dryRun);
+});
+
+compileCommandsCmd.SetAction(result =>
+{
+    var g = Setup(result);
+    var outPath = result.GetValue(compileCommandsOutputOption);
+    return CompileCommands(g, outPath);
 });
 
 return root.Parse(args).Invoke();
@@ -422,6 +436,29 @@ static int Affected(BuildGraph g, string[] explicitFiles)
         foreach (var o in cmd.Outputs)
             Console.WriteLine($"       out: {Clr.Yellow}{o}{Clr.Reset}");
     }
+    return 0;
+}
+
+static int CompileCommands(BuildGraph g, string? outputPath)
+{
+    var entries = g.Commands.Values
+        .Where(c => c.Tool == "CL" && !string.IsNullOrEmpty(c.CommandLine))
+        .Select(c =>
+        {
+            // First input is the source file; resolve to absolute for the spec
+            var file = c.Inputs.Count > 0
+                ? Path.GetFullPath(Path.Combine(g.RootDir, c.Inputs[0]))
+                : "";
+            var dir = !string.IsNullOrEmpty(c.WorkingDir) ? c.WorkingDir : g.RootDir;
+            return new { directory = dir, command = c.CommandLine, file };
+        })
+        .ToList();
+
+    var outFile = outputPath ?? Path.Combine(g.RootDir, "compile_commands.json");
+    var json = System.Text.Json.JsonSerializer.Serialize(entries,
+        new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+    File.WriteAllText(outFile, json);
+    Console.Error.WriteLine($"Wrote {entries.Count} entries to {outFile}");
     return 0;
 }
 
