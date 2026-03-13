@@ -190,19 +190,9 @@ static int OutputsOf(BuildGraph g, string[] files)
     {
         var resolved = ResolveFileArg(g, file);
         if (resolved == null) continue;
-
-        var outputs = g.GetOutputsOf(resolved).OrderBy(o => o, StringComparer.OrdinalIgnoreCase);
-        Console.WriteLine($"{Clr.Cyan}{file}{Clr.Reset}:");
-        foreach (var o in outputs)
-        {
-            var clr = g.Files.TryGetValue(o, out var f) ? f.Kind switch
-            {
-                FileKind.Source => Clr.Green,
-                FileKind.Output => Clr.Yellow,
-                _ => Clr.Dim
-            } : Clr.Dim;
-            Console.WriteLine($"  → {clr}{o}{Clr.Reset}");
-        }
+        Console.WriteLine($"{Clr.Cyan}{resolved}{Clr.Reset}");
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        PrintTreeForward(g, resolved, "", true, seen);
     }
     return 0;
 }
@@ -213,21 +203,73 @@ static int SourcesOf(BuildGraph g, string[] files)
     {
         var resolved = ResolveFileArg(g, file);
         if (resolved == null) continue;
-
-        var sources = g.GetSourcesOf(resolved).OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
-        Console.WriteLine($"{Clr.Cyan}{file}{Clr.Reset}:");
-        foreach (var s in sources)
-        {
-            var clr = g.Files.TryGetValue(s, out var f) ? f.Kind switch
-            {
-                FileKind.Source => Clr.Green,
-                FileKind.Output => Clr.Yellow,
-                _ => Clr.Dim
-            } : Clr.Dim;
-            Console.WriteLine($"  ← {clr}{s}{Clr.Reset}");
-        }
+        Console.WriteLine($"{Clr.Cyan}{resolved}{Clr.Reset}");
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        PrintTreeBackward(g, resolved, "", true, seen);
     }
     return 0;
+}
+
+static string FileClr(BuildGraph g, string path) =>
+    g.Files.TryGetValue(path, out var f) ? f.Kind switch
+    {
+        FileKind.Source => Clr.Green,
+        FileKind.Output => Clr.Yellow,
+        _ => Clr.Dim
+    } : Clr.Dim;
+
+static void PrintTreeForward(BuildGraph g, string filePath, string indent, bool last, HashSet<string> seen)
+{
+    if (!g.FileToConsumers.TryGetValue(filePath, out var consumerIds)) return;
+
+    // Collect (tool, output) pairs from all consuming commands, deduplicated
+    var children = new List<(string tool, string output)>();
+    var childSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var cmdId in consumerIds)
+        if (g.Commands.TryGetValue(cmdId, out var cmd))
+            foreach (var o in cmd.Outputs)
+                if (childSeen.Add(o))
+                    children.Add((cmd.Tool, o));
+    children.Sort((a, b) => string.Compare(a.output, b.output, StringComparison.OrdinalIgnoreCase));
+
+    for (int i = 0; i < children.Count; i++)
+    {
+        var (tool, output) = children[i];
+        var isLast = i == children.Count - 1;
+        var branch = isLast ? "└── " : "├── ";
+        var cont   = isLast ? "    " : "│   ";
+
+        if (!seen.Add(output))
+        {
+            Console.WriteLine($"{indent}{branch}{Clr.Dim}[{tool}] {output} (↑ above){Clr.Reset}");
+            continue;
+        }
+        Console.WriteLine($"{indent}{branch}{Clr.Dim}[{tool}]{Clr.Reset} {FileClr(g, output)}{output}{Clr.Reset}");
+        PrintTreeForward(g, output, indent + cont, isLast, seen);
+    }
+}
+
+static void PrintTreeBackward(BuildGraph g, string filePath, string indent, bool last, HashSet<string> seen)
+{
+    if (!g.FileToProducer.TryGetValue(filePath, out var producerId)) return;
+    if (!g.Commands.TryGetValue(producerId, out var cmd)) return;
+
+    var inputs = cmd.Inputs.OrderBy(i => i, StringComparer.OrdinalIgnoreCase).ToList();
+    for (int i = 0; i < inputs.Count; i++)
+    {
+        var input = inputs[i];
+        var isLast = i == inputs.Count - 1;
+        var branch = isLast ? "└── " : "├── ";
+        var cont   = isLast ? "    " : "│   ";
+
+        if (!seen.Add(input))
+        {
+            Console.WriteLine($"{indent}{branch}{Clr.Dim}[{cmd.Tool}] {input} (↑ above){Clr.Reset}");
+            continue;
+        }
+        Console.WriteLine($"{indent}{branch}{Clr.Dim}[{cmd.Tool}]{Clr.Reset} {FileClr(g, input)}{input}{Clr.Reset}");
+        PrintTreeBackward(g, input, indent + cont, isLast, seen);
+    }
 }
 
 /// Try to match a user-supplied filename/path against the graph's file index.
