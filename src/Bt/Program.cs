@@ -62,13 +62,14 @@ root.Add(buildCmd);
 root.Add(compileCommandsCmd);
 
 // Custom coloured help — runs before System.CommandLine's default help
+var btVersion = System.Reflection.Assembly.GetExecutingAssembly()
+    .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+    .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
+    ?? System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+
 if (args.Length == 1 && args[0] is "--version")
 {
-    var asm = System.Reflection.Assembly.GetExecutingAssembly();
-    var ver = asm.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
-        .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
-        ?? asm.GetName().Version?.ToString() ?? "unknown";
-    Console.WriteLine(ver);
+    Console.WriteLine(btVersion);
     return 0;
 }
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
@@ -79,7 +80,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
 
-        {Clr.Bold}bt{Clr.Reset} — MSBuild dependency graph explorer
+        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{btVersion}{Clr.Reset} — MSBuild dependency graph explorer
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt [command] [options]
 
