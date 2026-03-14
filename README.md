@@ -21,7 +21,7 @@ edge in the graph. Tlog files add precise `#include` tracking per source file.
 
 ## Getting started
 
-```bash
+``` powershell
 # One-time: full solution build with binary logging
 msbuild MySolution.sln -bl
 
@@ -101,7 +101,9 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 
 ## Building
 
-```bash
+For a local, self-contained build:
+
+``` powershell
 # Development
 dotnet run --project src/Bt -- dirty
 
