@@ -20,9 +20,9 @@ $config = Get-Content $configPath | ConvertFrom-Json
 $feedName = $config.Name
 $feedUrl  = $config.Url
 
-# Ensure feed is registered
+# Ensure feed is registered (check by name or URL)
 $sources = dotnet nuget list source
-if ($sources -notmatch [regex]::Escape($feedUrl)) {
+if ($sources -notmatch [regex]::Escape($feedUrl) -and $sources -notmatch [regex]::Escape($feedName)) {
     Write-Host "Adding NuGet source '$feedName' ..." -ForegroundColor Yellow
     dotnet nuget add source $feedUrl --name $feedName
 }

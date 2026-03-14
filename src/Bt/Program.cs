@@ -66,10 +66,13 @@ var btVersion = System.Reflection.Assembly.GetExecutingAssembly()
     .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
     .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
     ?? System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
-// Short version for help banner: trim commit hash to 7 chars
-var btVersionShort = btVersion.Contains('+') && btVersion.Length > btVersion.IndexOf('+') + 8
-    ? btVersion[..(btVersion.IndexOf('+') + 8)]
-    : btVersion;
+// Short version for help banner:
+// Published: 1.0.0-ci.62.1c145d8+fullhash → strip +hash (already in suffix)
+// Dev build: 1.0.0+fullhash → trim hash to 7 chars
+var plusIdx = btVersion.IndexOf('+');
+var btVersionShort = plusIdx < 0 ? btVersion
+    : btVersion.Contains("-ci.") ? btVersion[..plusIdx]
+    : btVersion[..Math.Min(btVersion.Length, plusIdx + 8)];
 
 if (args.Length == 1 && args[0] is "--version")
 {
