@@ -1701,7 +1701,7 @@ class BuildGraph
                 graph.FileToProducer.TryAdd(dstRel, cmdId);
             }
         }
-        // AppxPackageRecipe: WinAppSdkGenerateAppxPackageRecipe
+        // AppxPackageRecipe: WinAppSdkGenerateAppxPackageRecipe
         // Gathers payload (.exe, .winmd, .pri, AppxManifest, assets) → .build.appxrecipe
         // We connect only payload items already tracked in the graph as inputs.
         foreach (var recipeTask in build.FindChildrenRecursive<MSTask>(
@@ -1746,7 +1746,7 @@ class BuildGraph
             graph.Files.TryAdd(recipeRel, new FileNode(recipeRel, FileKinds.Classify(recipeRel)));
             graph.FileToProducer[recipeRel] = cmdId;
         }
-
+
 
         return graph;
     }
