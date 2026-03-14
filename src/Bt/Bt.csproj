@@ -8,6 +8,11 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <PublishTrimmed>true</PublishTrimmed>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>bt</ToolCommandName>
+    <PackageId>Bt</PackageId>
+    <Version>1.0.0</Version>
+    <Description>MSBuild dependency graph explorer — query, build, and generate compile_commands.json from binlogs</Description>
   </PropertyGroup>
 
   <ItemGroup>
