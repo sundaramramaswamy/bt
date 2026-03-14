@@ -62,6 +62,15 @@ root.Add(buildCmd);
 root.Add(compileCommandsCmd);
 
 // Custom coloured help — runs before System.CommandLine's default help
+if (args.Length == 1 && args[0] is "--version")
+{
+    var asm = System.Reflection.Assembly.GetExecutingAssembly();
+    var ver = asm.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
+        ?? asm.GetName().Version?.ToString() ?? "unknown";
+    Console.WriteLine(ver);
+    return 0;
+}
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
@@ -85,6 +94,8 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
           {Clr.Green}--color{Clr.Reset}  <mode>    auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+          {Clr.Green}--version{Clr.Reset}          Show version
+          {Clr.Green}-?, --help{Clr.Reset}         Show this help
 
         {Clr.Yellow}Graph filters:{Clr.Reset}
           {Clr.Green}-f, --file{Clr.Reset} <path>     Subgraph reachable from/to file
