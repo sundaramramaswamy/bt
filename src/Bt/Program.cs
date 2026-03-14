@@ -66,6 +66,10 @@ var btVersion = System.Reflection.Assembly.GetExecutingAssembly()
     .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
     .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
     ?? System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+// Short version for help banner: trim commit hash to 7 chars
+var btVersionShort = btVersion.Contains('+') && btVersion.Length > btVersion.IndexOf('+') + 8
+    ? btVersion[..(btVersion.IndexOf('+') + 8)]
+    : btVersion;
 
 if (args.Length == 1 && args[0] is "--version")
 {
@@ -80,7 +84,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
 
-        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{btVersion}{Clr.Reset} — MSBuild dependency graph explorer
+        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{btVersionShort}{Clr.Reset} — MSBuild dependency graph explorer
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt [command] [options]
 
