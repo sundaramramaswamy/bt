@@ -30,6 +30,7 @@ return command switch
     "props"   => Props(build, args),
     "search"  => Search(build, args),
     "targets" => Targets(build, args),
+    "envvars" => EnvVars(build),
     _         => Usage()
 };
 
@@ -202,4 +203,26 @@ static void DumpTree(BaseNode node, int depth, int maxDepth)
     if (node is TreeNode tree)
         foreach (var child in tree.Children)
             DumpTree(child, depth + 1, maxDepth);
+}
+
+int EnvVars(Build build)
+{
+    var seen = new HashSet<string>();
+    foreach (var t in build.FindChildrenRecursive<MSTask>(t => t.Name == "SetEnv"))
+    {
+        var pf = t.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+        if (pf == null) continue;
+        var name = pf.FindChildrenRecursive<Property>(p => p.Name == "Name").FirstOrDefault()?.Value ?? "";
+        var val = pf.FindChildrenRecursive<Property>(p => p.Name == "Value").FirstOrDefault()?.Value ?? "";
+        var proj = Project(t);
+        var target = Target(t);
+        var key = $"{proj}/{target}/{name}";
+        if (seen.Add(key))
+        {
+            var display = val.Length > 1000 ? val[..1000] + "..." : val;
+            Console.WriteLine($"[{proj}] [{target}] {name} = {display}");
+        }
+    }
+    Console.WriteLine($"\n{seen.Count} unique SetEnv calls");
+    return 0;
 }
