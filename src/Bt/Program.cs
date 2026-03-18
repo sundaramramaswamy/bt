@@ -1288,10 +1288,13 @@ class BuildGraph
             {
                 // CL batches N sources but the relationship is 1:1 (each .cpp → its .obj).
                 // Split into individual commands to keep the graph accurate.
-                var objDir = pf.FindChildrenRecursive<Property>(p => p.Name == "ObjectFileName")
+                var objFileName = pf.FindChildrenRecursive<Property>(p => p.Name == "ObjectFileName")
                     .FirstOrDefault()?.Value ?? "";
-                var absObjDir = ResolveAbsolute(projDir, objDir);
-                objDirsByProject.TryAdd(proj, absObjDir);
+                var absObjFileName = ResolveAbsolute(projDir, objFileName);
+                // ObjectFileName ending with \ or / is a directory; otherwise it's a specific file.
+                bool objIsDir = objFileName.Length == 0
+                    || objFileName[^1] is '\\' or '/';
+                if (objIsDir) objDirsByProject.TryAdd(proj, absObjFileName);
 
                 // PCH detection: /Yc = create, /Yu = use
                 var pchOutFile = pf.FindChildrenRecursive<Property>(p => p.Name == "PrecompiledHeaderOutputFile")
@@ -1303,8 +1306,10 @@ class BuildGraph
 
                 foreach (var src in sources)
                 {
-                    var obj = graph.ToRelative(Path.Combine(absObjDir,
-                        Path.GetFileNameWithoutExtension(src) + ".obj"));
+                    var obj = objIsDir
+                        ? graph.ToRelative(Path.Combine(absObjFileName,
+                            Path.GetFileNameWithoutExtension(src) + ".obj"))
+                        : graph.ToRelative(absObjFileName);
                     var cmdId = $"CL#{cmdIndex++}:{proj}/{target}";
                     // Build per-file command line: strip batched sources, append single source
                     var absSrc = Path.GetFullPath(Path.Combine(graph.RootDir, src));
