@@ -1,7 +1,7 @@
 # bt
 
-**MSBuild dependency graph explorer.**  
-Parses a binary log, builds a file-level dependency graph, and lets you query it.
+**MSBuild incremental build tool.**  
+Parses a binary log, builds a file-level dependency graph, and lets you query and rebuild from it.
 
 ```
 bt bins TestDataItem.h        # what gets rebuilt when this header changes?

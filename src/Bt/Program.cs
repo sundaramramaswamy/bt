@@ -51,7 +51,7 @@ var compileCommandsCmd = new Command("compiledb", "Generate compile_commands.jso
 compileCommandsCmd.Add(compileCommandsOutputOption);
 
 // -- Wire up --
-var root = new RootCommand("bt — MSBuild dependency graph explorer");
+var root = new RootCommand("bt — MSBuild incremental build tool");
 root.Add(binlogOption);
 root.Add(colorOption);
 root.Add(graphCmd);
@@ -87,7 +87,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
 
-        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{btVersionShort}{Clr.Reset} — MSBuild dependency graph explorer
+        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{btVersionShort}{Clr.Reset} — MSBuild incremental build tool
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt [command] [options]
 

@@ -10,9 +10,10 @@
     <PublishTrimmed>true</PublishTrimmed>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>bt</ToolCommandName>
+    <AssemblyName>bt</AssemblyName>
     <PackageId>Bt</PackageId>
     <Version>1.0.0</Version>
-    <Description>MSBuild dependency graph explorer — query, build, and generate compile_commands.json from binlogs</Description>
+    <Description>MSBuild incremental build tool — query, build, and generate compile_commands.json from binlogs</Description>
   </PropertyGroup>
 
   <ItemGroup>
