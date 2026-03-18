@@ -797,7 +797,7 @@ record FileNode(string Path, FileKind Kind);
 
 record CommandNode(
     string Id,
-    string Tool,         // "CL", "Link", "Lib"
+    string Tool,         // "CL", "LINK", "LIB", "MIDL"
     string Project,
     string Target,
     List<string> Inputs,
@@ -1259,7 +1259,8 @@ class BuildGraph
         // Track intermediate output dirs per project (for discovering tlog directories).
         var objDirsByProject = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name is "CL" or "Link" or "Lib" or "MIDL"))
+        var knownTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "CL", "LINK", "LIB", "MIDL" };
+        foreach (var task in build.FindChildrenRecursive<MSTask>(t => knownTools.Contains(t.Name)))
         {
             var projNode = task.GetNearestParent<Project>();
             var proj = projNode?.Name ?? "unknown";
@@ -1270,7 +1271,9 @@ class BuildGraph
             var pf = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
             if (pf == null) continue;
 
-            var toolName = task.Name;
+            // Normalize tool names at the boundary — MSBuild may report any casing
+            // (e.g. "LIB" vs "Lib", "Link" vs "LINK"). Canonical form is uppercase.
+            var toolName = task.Name.ToUpperInvariant();
             // Extract the full command line from binlog (available for CL, Link, Lib, MIDL)
             // CommandLineArguments is a child of the task, not inside the Parameters folder.
             var cmdLineRaw = (task.FindChildrenRecursive<Property>(p => p.Name == "CommandLineArguments")
