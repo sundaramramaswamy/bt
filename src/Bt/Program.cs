@@ -983,6 +983,7 @@ class BuildGraph
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         CollectForward(filePath, result);
+        result.Remove(filePath); // allow backward walk to re-enter at start node
         CollectBackward(filePath, result);
         return result;
     }
