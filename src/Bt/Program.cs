@@ -76,7 +76,7 @@ var btVersionShort = plusIdx < 0 ? btVersion
 
 if (args.Length == 1 && args[0] is "--version")
 {
-    Console.WriteLine(btVersion);
+    Console.WriteLine(btVersionShort);
     return 0;
 }
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
