@@ -52,6 +52,11 @@ compileCommandsCmd.Add(compileCommandsOutputOption);
 
 var cacheCmd = new Command("cache", "Parse binlog and cache dependency graph");
 
+var watchDebounceOption = new Option<int>("--debounce") { Description = "Debounce delay in ms before triggering build (default: 300)" };
+watchDebounceOption.DefaultValueFactory = _ => 300;
+var watchCmd = new Command("watch", "Watch sources and rebuild on change");
+watchCmd.Add(watchDebounceOption);
+
 // -- Wire up --
 var root = new RootCommand("bt — MSBuild incremental build tool");
 root.Add(binlogOption);
@@ -63,6 +68,7 @@ root.Add(affectedCmd);
 root.Add(buildCmd);
 root.Add(compileCommandsCmd);
 root.Add(cacheCmd);
+root.Add(watchCmd);
 
 // Custom coloured help — runs before System.CommandLine's default help
 var btVersion = System.Reflection.Assembly.GetExecutingAssembly()
@@ -85,7 +91,7 @@ if (args.Length == 1 && args[0] is "--version")
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
-    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb" or "cache"))
+    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb" or "cache" or "watch"))
     {
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
@@ -102,6 +108,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Cyan}build{Clr.Reset} [files]      Build only what's dirty (-j N, --dry-run)
           {Clr.Cyan}compiledb{Clr.Reset}          Generate compile_commands.json (-o path)
           {Clr.Cyan}cache{Clr.Reset}              Parse binlog and cache dependency graph
+          {Clr.Cyan}watch{Clr.Reset}              Watch sources and rebuild on change
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
@@ -178,6 +185,17 @@ cacheCmd.SetAction(result =>
 {
     Setup(result);
     return 0;
+});
+
+watchCmd.SetAction(result =>
+{
+    var g = Setup(result);
+    var binlog = result.GetValue(binlogOption)!;
+    if (!File.Exists(binlog) && binlog == "msbuild.binlog")
+        foreach (var alt in new[] { "msbuild_debug.binlog", "msbuild_release.binlog" })
+            if (File.Exists(alt)) { binlog = alt; break; }
+    var debounceMs = result.GetValue(watchDebounceOption);
+    return RunWatch(g, Path.GetFullPath(binlog), debounceMs);
 });
 
 return root.Parse(args).Invoke();
@@ -650,6 +668,161 @@ static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryR
         Console.Error.WriteLine($"{Clr.Red}Build failed{Clr.Reset} ({failures}/{plan.Count} commands failed, {sw.Elapsed.TotalSeconds:F1}s)");
 
     return failures > 0 ? 1 : 0;
+}
+
+static int RunWatch(BuildGraph graph, string binlogPath, int debounceMs)
+{
+    var maxJobs = Environment.ProcessorCount;
+    var watchExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { ".c", ".cc", ".cpp", ".cxx", ".inl", ".h", ".hh", ".hxx", ".hpp", ".idl" };
+
+    // Count watched files in graph
+    var watchedCount = graph.Files.Values.Count(f => watchExts.Contains(Path.GetExtension(f.Path)));
+    var projects = graph.Commands.Values.Select(c => c.Project).Where(p => !string.IsNullOrEmpty(p))
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    Console.Error.WriteLine($"{Clr.Bold}Watching{Clr.Reset} {Clr.Cyan}{watchedCount}{Clr.Reset} files in {Clr.Cyan}{projects.Count}{Clr.Reset} projects {Clr.Dim}(debounce {debounceMs}ms, {maxJobs} cores){Clr.Reset}");
+    Console.Error.WriteLine($"{Clr.Dim}Press Ctrl+C to stop.{Clr.Reset}");
+    Console.Error.WriteLine();
+
+    // State
+    var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var pendingLock = new object();
+    var buildInProgress = false;
+    var rerunNeeded = false;
+    Timer? debounceTimer = null;
+    var cts = new CancellationTokenSource();
+    var binlogStamp = File.GetLastWriteTimeUtc(binlogPath);
+
+    // Ctrl+C handler
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;
+        cts.Cancel();
+    };
+
+    void TriggerBuild()
+    {
+        HashSet<string> batch;
+        lock (pendingLock)
+        {
+            if (pending.Count == 0) return;
+            if (buildInProgress) { rerunNeeded = true; return; }
+            batch = new HashSet<string>(pending, StringComparer.OrdinalIgnoreCase);
+            pending.Clear();
+            buildInProgress = true;
+        }
+
+        // Check if binlog was updated externally → reload graph
+        var currentBinlogStamp = File.GetLastWriteTimeUtc(binlogPath);
+        if (currentBinlogStamp != binlogStamp)
+        {
+            Console.Error.WriteLine($"\n{Clr.Yellow}Binlog changed — reloading graph...{Clr.Reset}");
+            try
+            {
+                graph = LoadGraph(binlogPath);
+                binlogStamp = currentBinlogStamp;
+                watchedCount = graph.Files.Values.Count(f => watchExts.Contains(Path.GetExtension(f.Path)));
+                Console.Error.WriteLine($"{Clr.Dim}Reloaded: {watchedCount} files{Clr.Reset}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"{Clr.Red}Reload failed: {ex.Message}{Clr.Reset}");
+            }
+        }
+
+        // Resolve batch against graph
+        var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in batch)
+        {
+            var r = ResolveFileArg(graph, f);
+            if (r != null) resolved.Add(r);
+        }
+
+        if (resolved.Count == 0)
+        {
+            lock (pendingLock) { buildInProgress = false; }
+            return;
+        }
+
+        var timestamp = DateTime.Now.ToString("HH:mm:ss");
+        Console.Error.WriteLine($"\n{Clr.Bold}--- {timestamp} ---{Clr.Reset}");
+        foreach (var f in resolved.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
+        Console.Error.WriteLine();
+
+        RunBuild(graph, resolved.ToArray(), maxJobs, dryRun: false);
+
+        Console.Error.WriteLine($"{Clr.Dim}Waiting for changes...{Clr.Reset}");
+
+        lock (pendingLock)
+        {
+            buildInProgress = false;
+            if (rerunNeeded)
+            {
+                rerunNeeded = false;
+                // Re-trigger on the thread pool so we don't stack calls
+                ThreadPool.QueueUserWorkItem(_ => TriggerBuild());
+            }
+        }
+    }
+
+    void OnFileEvent(string fullPath)
+    {
+        var ext = Path.GetExtension(fullPath);
+        if (!watchExts.Contains(ext)) return;
+
+        // Convert to a path ResolveFileArg can handle (root-relative or absolute)
+        var relativePath = Path.GetRelativePath(graph.RootDir, fullPath);
+
+        lock (pendingLock)
+        {
+            pending.Add(relativePath);
+        }
+
+        // Reset debounce timer
+        debounceTimer?.Dispose();
+        debounceTimer = new Timer(_ => TriggerBuild(), null, debounceMs, Timeout.Infinite);
+    }
+
+    // Set up FileSystemWatcher on the repo root
+    using var watcher = new FileSystemWatcher(graph.RootDir)
+    {
+        IncludeSubdirectories = true,
+        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
+        EnableRaisingEvents = true
+    };
+
+    watcher.Changed += (_, e) => OnFileEvent(e.FullPath);
+    watcher.Created += (_, e) => OnFileEvent(e.FullPath);
+    watcher.Renamed += (_, e) => OnFileEvent(e.FullPath);
+
+    // Also watch the binlog itself for external rebuilds
+    var binlogDir = Path.GetDirectoryName(binlogPath) ?? ".";
+    var binlogName = Path.GetFileName(binlogPath);
+    using var binlogWatcher = new FileSystemWatcher(binlogDir, binlogName)
+    {
+        NotifyFilter = NotifyFilters.LastWrite,
+        EnableRaisingEvents = true
+    };
+    binlogWatcher.Changed += (_, _) =>
+    {
+        // On next source-triggered build, graph will be reloaded.
+        // Also schedule a no-op trigger so the reload message appears promptly.
+        lock (pendingLock)
+        {
+            // Don't trigger a build, just note the binlog changed.
+            // The reload will happen at the start of the next TriggerBuild().
+        }
+    };
+
+    Console.Error.WriteLine($"{Clr.Dim}Waiting for changes...{Clr.Reset}");
+
+    // Block until Ctrl+C
+    try { cts.Token.WaitHandle.WaitOne(); } catch (ObjectDisposedException) { }
+
+    debounceTimer?.Dispose();
+    Console.Error.WriteLine($"\n{Clr.Dim}Watch stopped.{Clr.Reset}");
+    return 0;
 }
 
 static (int exitCode, string output) ExecuteCommand(CommandNode cmd)

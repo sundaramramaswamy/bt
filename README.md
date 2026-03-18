@@ -32,6 +32,7 @@ bt dirty                      # build plan from file timestamps (mtime)
 bt dirty MyFile.cpp           # build plan for specific file(s)
 bt build                      # rebuild only what's stale
 bt build -n                   # dry-run — show commands without executing
+bt watch                      # watch sources, rebuild on save
 bt compiledb                  # generate compile_commands.json for clangd
 bt graph -p MyProject         # DOT graph filtered to one project
 bt graph -f MyFile.cpp        # DOT subgraph around one file
@@ -48,6 +49,7 @@ parsing unless the binlog changes.
 | `bt srcs <files>` | Upstream dependency tree — what sources feed into `<file>` |
 | `bt dirty [files]` | Topo-sorted build plan (default: mtime-based; explicit files override) |
 | `bt build [files]` | Execute dirty commands in parallel waves (`-j N`, `--dry-run`) |
+| `bt watch` | Watch sources and rebuild on change (`--debounce ms`) |
 | `bt compiledb` | Generate `compile_commands.json` for clangd / clang-tidy |
 | `bt cache` | Parse binlog and cache dependency graph |
 | `bt graph` | Emit full Graphviz DOT graph (pipe to `dot`, `d2`, etc.) |
@@ -68,6 +70,7 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 | `--color <mode>` | `auto` | ANSI colours: `auto`, `always`, `never` |
 | `-j <N>` | CPU cores | Max parallel commands for `build` |
 | `-n, --dry-run` | — | Print commands without executing (`build` only) |
+| `--debounce <ms>` | `300` | Debounce delay before rebuilding (`watch` only) |
 | `-o <path>` | `compile_commands.json` | Output file for `compiledb` |
 
 ## What's in the graph
