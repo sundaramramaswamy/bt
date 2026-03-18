@@ -49,6 +49,7 @@ parsing unless the binlog changes.
 | `bt dirty [files]` | Topo-sorted build plan (default: mtime-based; explicit files override) |
 | `bt build [files]` | Execute dirty commands in parallel waves (`-j N`, `--dry-run`) |
 | `bt compiledb` | Generate `compile_commands.json` for clangd / clang-tidy |
+| `bt cache` | Parse binlog and cache dependency graph |
 | `bt graph` | Emit full Graphviz DOT graph (pipe to `dot`, `d2`, etc.) |
 
 ### Graph filters

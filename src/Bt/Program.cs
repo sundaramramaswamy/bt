@@ -50,6 +50,8 @@ var compileCommandsOutputOption = new Option<string>("-o") { Description = "Outp
 var compileCommandsCmd = new Command("compiledb", "Generate compile_commands.json for clangd/clang-tidy");
 compileCommandsCmd.Add(compileCommandsOutputOption);
 
+var cacheCmd = new Command("cache", "Parse binlog and cache dependency graph");
+
 // -- Wire up --
 var root = new RootCommand("bt — MSBuild incremental build tool");
 root.Add(binlogOption);
@@ -60,6 +62,7 @@ root.Add(sourcesOfCmd);
 root.Add(affectedCmd);
 root.Add(buildCmd);
 root.Add(compileCommandsCmd);
+root.Add(cacheCmd);
 
 // Custom coloured help — runs before System.CommandLine's default help
 var btVersion = System.Reflection.Assembly.GetExecutingAssembly()
@@ -82,7 +85,7 @@ if (args.Length == 1 && args[0] is "--version")
 if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
-    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb"))
+    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb" or "cache"))
     {
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""
@@ -98,6 +101,7 @@ if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
           {Clr.Cyan}dirty{Clr.Reset} [files]      Build plan (mtime-based, or explicit files)
           {Clr.Cyan}build{Clr.Reset} [files]      Build only what's dirty (-j N, --dry-run)
           {Clr.Cyan}compiledb{Clr.Reset}          Generate compile_commands.json (-o path)
+          {Clr.Cyan}cache{Clr.Reset}              Parse binlog and cache dependency graph
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
@@ -168,6 +172,12 @@ compileCommandsCmd.SetAction(result =>
     var g = Setup(result);
     var outPath = result.GetValue(compileCommandsOutputOption);
     return CompileCommands(g, outPath);
+});
+
+cacheCmd.SetAction(result =>
+{
+    Setup(result);
+    return 0;
 });
 
 return root.Parse(args).Invoke();
