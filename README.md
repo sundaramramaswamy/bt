@@ -101,7 +101,7 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 
 4. **Query** — `bins`/`srcs` walk the graph forward/backward, printing a tree. `dirty` computes a topo-sorted build plan using file timestamps (like `make`/`ninja`). `graph` emits DOT for visualization.
 
-5. **Build** — `build` executes dirty commands in parallel, invoking `cl.exe`, `link.exe`, etc. directly — no MSBuild overhead.
+5. **Build** — `build` executes dirty commands in parallel, invoking `cl.exe`, `link.exe`, etc. directly — no MSBuild overhead. Environment variables (`INCLUDE`, `LIB`, `PATH`, etc.) are captured from the binlog's `SetEnv` tasks and replayed per-project.
 
 ## Building
 

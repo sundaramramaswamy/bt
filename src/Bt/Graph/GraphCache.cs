@@ -26,6 +26,11 @@ static class GraphCache
         }
         foreach (var p in graph.ExternalPrefixes)
             stringSet.Add(p);
+        foreach (var (proj, envMap) in graph.ProjectEnv)
+        {
+            stringSet.Add(proj);
+            foreach (var (k, v) in envMap) { stringSet.Add(k); stringSet.Add(v); }
+        }
 
         var strings = stringSet.ToArray();
         var indexOf = new Dictionary<string, int>(strings.Length, StringComparer.Ordinal);
@@ -55,6 +60,12 @@ static class GraphCache
             }).ToList(),
             ExternalPrefixIndices = graph.ExternalPrefixes
                 .Select(p => indexOf[p]).ToArray(),
+            ProjectEnvs = graph.ProjectEnv.Select(kv => new ProjectEnvFb
+            {
+                ProjectIdx = indexOf[kv.Key],
+                VarNameIndices = kv.Value.Keys.Select(k => indexOf[k]).ToArray(),
+                VarValueIndices = kv.Value.Values.Select(v => indexOf[v]).ToArray(),
+            }).ToList(),
         };
 
         int maxSize = Serializer.GetMaxSize(fb);
@@ -121,6 +132,20 @@ static class GraphCache
                 }
             }
         }
+
+        // Rebuild ProjectEnv
+        if (fb.ProjectEnvs is { } envs)
+            foreach (var pe in envs)
+            {
+                var proj = strings[pe.ProjectIdx];
+                var names = pe.VarNameIndices;
+                var values = pe.VarValueIndices;
+                if (names is null || values is null || names.Count != values.Count) continue;
+                var envMap = new Dictionary<string, string>(names.Count, StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < names.Count; i++)
+                    envMap[strings[names[i]]] = strings[values[i]];
+                graph.ProjectEnv[proj] = envMap;
+            }
 
         return (fb.BinlogTimestamp, graph);
     }

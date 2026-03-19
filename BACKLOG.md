@@ -23,3 +23,6 @@
   Toolchain updates (e.g. VS update changing `stdio.h`) require a full
   `msbuild -bl` rebuild. By design — checking SDK paths on every sweep
   would be slow and almost never useful.
+- `build` replays SetEnv-provided environment (INCLUDE, LIB, PATH, etc.)
+  from the binlog. Env vars set by other means (e.g. shell profile) are
+  inherited from the current process but not captured.

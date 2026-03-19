@@ -65,6 +65,10 @@ static class BuildCommand
             if (!g.FileToProducer.TryGetValue(f.Path, out var pid) || !planIds.Contains(pid))
                 produced.Add(f.Path);
 
+        // Resolve per-project environment variables for command replay.
+        // SetEnv tasks in binlog set PATH, INCLUDE, LIB, etc.
+        var envByProject = g.ProjectEnv;
+
         var remaining = new List<CommandNode>(plan);
         int failures = 0;
         int completed = 0;
@@ -116,7 +120,7 @@ static class BuildCommand
             Parallel.ForEach(wave, new ParallelOptions { MaxDegreeOfParallelism = maxJobs }, cmd =>
             {
                 WriteStatus(cmd.Tool, cmd.Outputs.FirstOrDefault() ?? cmd.Id, done: false);
-                var (exitCode, output) = ExecuteCommand(cmd);
+                var (exitCode, output) = ExecuteCommand(cmd, envByProject.GetValueOrDefault(cmd.Project));
                 Interlocked.Increment(ref completed);
                 results.Add((cmd, exitCode, output));
                 WriteStatus(cmd.Tool, cmd.Outputs.FirstOrDefault() ?? cmd.Id, done: true, failed: exitCode != 0);
@@ -153,7 +157,7 @@ static class BuildCommand
         return failures > 0 ? 1 : 0;
     }
 
-    public static (int exitCode, string output) ExecuteCommand(CommandNode cmd)
+    public static (int exitCode, string output) ExecuteCommand(CommandNode cmd, Dictionary<string, string>? env = null)
     {
         var cmdLine = cmd.CommandLine;
         string exe, args;
@@ -189,6 +193,11 @@ static class BuildCommand
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+
+        // Apply per-project environment from binlog SetEnv tasks
+        if (env is { Count: > 0 })
+            foreach (var (k, v) in env)
+                psi.Environment[k] = v;
 
         try
         {

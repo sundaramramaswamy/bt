@@ -15,6 +15,10 @@ class BuildGraph
     /// are SDK/generated headers — excluded from mtime dirty checking.
     public HashSet<string> ExternalPrefixes { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// Per-project environment variables extracted from SetEnv tasks in the binlog.
+    /// Key: project file name (e.g. "XaBench.vcxproj"), Value: env var name → value.
+    public Dictionary<string, Dictionary<string, string>> ProjectEnv { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     // file → synthetic (#include) commands that produce it (1:N, unlike FileToProducer)
     public Dictionary<string, List<string>> SyntheticProducers { get; } = new(StringComparer.OrdinalIgnoreCase);
 

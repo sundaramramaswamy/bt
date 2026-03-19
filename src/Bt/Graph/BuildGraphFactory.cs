@@ -16,25 +16,40 @@ static class BuildGraphFactory
         var graph = new BuildGraph { RootDir = rootDir };
         int cmdIndex = 0;
 
-        // Extract external include prefixes from CAExcludePath (per-project SetEnv task).
-        // These are SDK/generated directories whose headers we skip in mtime checks.
+        // Extract environment variables from SetEnv tasks (per-project).
+        // These include PATH, INCLUDE, LIB, etc. needed to replay CL/LINK.
+        // Also extract CAExcludePath for mtime-skip prefixes.
         foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name == "SetEnv"))
         {
             var pf = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
             var name = pf?.FindChildrenRecursive<Property>(p => p.Name == "Name")
                 .FirstOrDefault()?.Value;
-            if (name != "CAExcludePath") continue;
+            if (string.IsNullOrEmpty(name)) continue;
             var value = pf?.FindChildrenRecursive<Property>(p => p.Name == "Value")
                 .FirstOrDefault()?.Value ?? "";
             var projNode = task.GetNearestParent<Project>();
+            var projFile = projNode?.ProjectFile != null
+                ? Path.GetFileName(projNode.ProjectFile) : "";
             var projDir = projNode?.ProjectFile != null
                 ? Path.GetDirectoryName(Path.GetFullPath(projNode.ProjectFile)) ?? ""
                 : "";
+
+            // Store env var for later replay in ExecuteCommand
+            if (!string.IsNullOrEmpty(projFile))
+            {
+                if (!graph.ProjectEnv.TryGetValue(projFile, out var envMap))
+                {
+                    envMap = new(StringComparer.OrdinalIgnoreCase);
+                    graph.ProjectEnv[projFile] = envMap;
+                }
+                envMap[name] = value;
+            }
+
+            // CAExcludePath: also extract as mtime-skip prefixes
+            if (name != "CAExcludePath") continue;
             foreach (var dir in value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                if (dir == "PreventSdkUapPropsAssignment") continue; // not a path
-                // Absolute paths (SDK, toolchain) → convert to root-relative
-                // Relative paths (e.g. "Generated Files\") → prepend project-relative prefix
+                if (dir == "PreventSdkUapPropsAssignment") continue;
                 var abs = Path.IsPathRooted(dir) ? dir : Path.GetFullPath(Path.Combine(projDir, dir));
                 var rel = Path.GetRelativePath(rootDir, abs);
                 if (!rel.EndsWith('\\')) rel += '\\';

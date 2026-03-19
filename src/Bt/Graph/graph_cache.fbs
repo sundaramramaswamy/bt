@@ -15,6 +15,7 @@ table GraphFb (fs_serializer) {
     files:[FileFb];
     commands:[CommandFb];
     external_prefix_indices:[int];      // indices into strings
+    project_envs:[ProjectEnvFb];        // per-project environment variables
 }
 
 table FileFb {
@@ -31,4 +32,10 @@ table CommandFb {
     output_indices:[int];               // indices into strings
     cmdline_idx:int;
     workdir_idx:int;
+}
+
+table ProjectEnvFb {
+    project_idx:int;                    // index into strings (project file name)
+    var_name_indices:[int];             // indices into strings (env var names)
+    var_value_indices:[int];            // indices into strings (env var values)
 }
