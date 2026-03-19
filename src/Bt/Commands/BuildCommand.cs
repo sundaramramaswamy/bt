@@ -57,9 +57,12 @@ static class BuildCommand
         }
 
         // Execute in waves: commands whose inputs are all "done" can run in parallel.
+        // Seed with files that are already available: source files (no producer)
+        // plus outputs of commands NOT in the plan (already up-to-date).
+        var planIds = new HashSet<string>(plan.Select(c => c.Id), StringComparer.OrdinalIgnoreCase);
         var produced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in g.Files.Values)
-            if (!g.FileToProducer.ContainsKey(f.Path))
+            if (!g.FileToProducer.TryGetValue(f.Path, out var pid) || !planIds.Contains(pid))
                 produced.Add(f.Path);
 
         var remaining = new List<CommandNode>(plan);
