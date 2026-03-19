@@ -166,9 +166,20 @@ static class BuildCommand
         }
         else
         {
+            // Binlog command lines often have unquoted paths with spaces
+            // e.g. "C:\Program Files\...\cl.exe /nologo /c ..."
+            // Try progressively longer prefixes until we find an existing file.
             var sp = cmdLine.IndexOf(' ');
             exe = sp > 0 ? cmdLine[..sp] : cmdLine;
             args = sp > 0 ? cmdLine[(sp + 1)..] : "";
+
+            while (sp > 0 && !File.Exists(exe))
+            {
+                sp = cmdLine.IndexOf(' ', sp + 1);
+                if (sp < 0) { exe = cmdLine; args = ""; break; }
+                exe = cmdLine[..sp];
+                args = cmdLine[(sp + 1)..];
+            }
         }
 
         var psi = new System.Diagnostics.ProcessStartInfo(exe, args)
