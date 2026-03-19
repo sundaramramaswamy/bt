@@ -223,7 +223,7 @@ static BuildGraph LoadGraph(string binlogPath)
 
     var binlogDir = Path.GetDirectoryName(Path.GetFullPath(binlogPath)) ?? ".";
     var cacheDir = Path.Combine(binlogDir, ".bt");
-    var cacheName = Path.GetFileNameWithoutExtension(binlogPath) + ".graph.fb";
+    var cacheName = Path.GetFileNameWithoutExtension(binlogPath) + ".fb";
     var cachePath = Path.Combine(cacheDir, cacheName);
     var binlogStamp = File.GetLastWriteTimeUtc(binlogPath);
 

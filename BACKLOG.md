@@ -3,11 +3,8 @@
 ## Optimization
 - [x] ~~Filter generated/SDK headers from mtime dirty sweep~~
       Done: uses CAExcludePath from binlog
-- [ ] **FlatBuffers cache** — replace gzip+JSON graph cache with FlatBuffers
-      for zero-copy deserialization.  Current JSON deser ~700ms on large
-      graphs; FlatBuffers would be <5ms (mmap, no alloc, no parse).
-      NuGet: `Google.FlatBuffers`.  Define `.fbs` schema, `flatc --csharp`.
-      Rebuild string→node dictionaries on load (still much faster than JSON).
+- [x] ~~FlatBuffers cache~~ — replaced gzip+JSON with FlatSharp (FlatBuffers).
+      Sorted string table with int indices; ~700ms → ~20ms cache load.
 - [ ] **NativeAOT** — add `<PublishAot>true</PublishAot>` to eliminate .NET
       startup (~150ms → ~5ms).  Requires dropping `PackAsTool` (incompatible
       with AOT; distribute as standalone binary instead).  Source-generated

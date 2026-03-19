@@ -38,8 +38,8 @@ bt graph -p MyProject         # DOT graph filtered to one project
 bt graph -f MyFile.cpp        # DOT subgraph around one file
 ```
 
-The graph is cached to `.bt/<name>.graph.json.gz` — subsequent runs skip binlog
-parsing unless the binlog changes.
+The graph is cached to `.bt/<name>.fb` (FlatBuffers) — subsequent runs skip
+binlog parsing unless the binlog changes.
 
 ## Commands
 
@@ -97,7 +97,7 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 
 2. **Tlog enrichment** — If CL tracker logs (`.tlog`) exist in intermediate dirs, `bt` reads them to wire precise `#include` edges: `header.h → [#include] → source.cpp`. Falls back to conservative `ClInclude` if tlogs are missing.
 
-3. **Cache** — The graph serializes to `.bt/<name>.graph.json.gz` (GZip-compressed). Invalidated when the binlog's timestamp changes.
+3. **Cache** — The graph serializes to `.bt/<name>.fb` (FlatBuffers with a sorted string table and integer indices). Invalidated when the binlog's timestamp changes.
 
 4. **Query** — `bins`/`srcs` walk the graph forward/backward, printing a tree. `dirty` computes a topo-sorted build plan using file timestamps (like `make`/`ninja`). `graph` emits DOT for visualization.
 
