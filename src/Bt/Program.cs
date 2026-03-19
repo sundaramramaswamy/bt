@@ -223,7 +223,7 @@ static BuildGraph LoadGraph(string binlogPath)
 
     var binlogDir = Path.GetDirectoryName(Path.GetFullPath(binlogPath)) ?? ".";
     var cacheDir = Path.Combine(binlogDir, ".bt");
-    var cacheName = Path.GetFileNameWithoutExtension(binlogPath) + ".graph.json.gz";
+    var cacheName = Path.GetFileNameWithoutExtension(binlogPath) + ".graph.fb";
     var cachePath = Path.Combine(cacheDir, cacheName);
     var binlogStamp = File.GetLastWriteTimeUtc(binlogPath);
 
@@ -233,10 +233,10 @@ static BuildGraph LoadGraph(string binlogPath)
         try
         {
             var cached = GraphCache.Load(cachePath);
-            if (cached != null && cached.BinlogTimestamp == binlogStamp.Ticks)
+            if (cached is { } c && c.BinlogTimestamp == binlogStamp.Ticks)
             {
                 Console.Error.WriteLine($"{Clr.Dim}cache:{Clr.Reset} {cachePath}");
-                return cached.ToGraph();
+                return c.Graph;
             }
             Console.Error.WriteLine($"{Clr.Dim}cache stale, rebuilding{Clr.Reset}");
         }

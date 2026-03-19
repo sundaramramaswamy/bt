@@ -17,8 +17,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FlatSharp.Compiler" Version="7.9.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="FlatSharp.Runtime" Version="7.9.0" />
     <PackageReference Include="MSBuild.StructuredLogger" Version="2.3.113" />
     <PackageReference Include="System.CommandLine" Version="2.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FlatSharpSchema Include="Graph\graph_cache.fbs" />
   </ItemGroup>
 
 </Project>

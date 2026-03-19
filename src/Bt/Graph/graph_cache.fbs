@@ -1,0 +1,34 @@
+// Build graph cache schema for bt.
+// Uses a string table with integer indices for compact storage.
+// All unique strings are stored once, sorted; files and commands
+// reference them by index.
+
+attribute "fs_serializer";
+
+namespace Bt.Cache;
+
+table GraphFb (fs_serializer) {
+    version:int = 1;
+    binlog_timestamp:long;
+    root_dir:string;
+    strings:[string];                   // sorted, deduped string table
+    files:[FileFb];
+    commands:[CommandFb];
+    external_prefix_indices:[int];      // indices into strings
+}
+
+table FileFb {
+    str_idx:int;
+    kind:ubyte;                         // FileKind: 0=Source 1=Intermediate 2=Output
+}
+
+table CommandFb {
+    id_idx:int;                         // index into strings
+    tool_idx:int;
+    project_idx:int;
+    target_idx:int;
+    input_indices:[int];                // indices into strings
+    output_indices:[int];               // indices into strings
+    cmdline_idx:int;
+    workdir_idx:int;
+}

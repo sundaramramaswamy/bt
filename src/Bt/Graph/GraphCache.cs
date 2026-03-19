@@ -1,59 +1,115 @@
-using System.IO.Compression;
-using System.Text.Json;
+using Bt.Cache;
+using FlatSharp;
 
-/// Serializable representation of the build graph.
-class GraphCache
+/// FlatBuffer-based serialization of the build graph cache.
+/// Uses a sorted string table with integer indices for compact storage.
+static class GraphCache
 {
-    public long BinlogTimestamp { get; set; }
-    public string RootDir { get; set; } = "";
-    public List<CachedFile> Files { get; set; } = [];
-    public List<CachedCommand> Commands { get; set; } = [];
-    public List<string> ExternalPrefixes { get; set; } = [];
+    static readonly ISerializer<GraphFb> Serializer = GraphFb.Serializer;
 
     public static void Save(string path, BuildGraph graph, DateTime binlogStamp)
     {
-        var cache = new GraphCache
+        // Build string table: collect all unique strings, sorted
+        var stringSet = new SortedSet<string>(StringComparer.Ordinal) { "" };
+        foreach (var f in graph.Files.Values)
+            stringSet.Add(f.Path);
+        foreach (var c in graph.Commands.Values)
         {
+            stringSet.Add(c.Id);
+            stringSet.Add(c.Tool);
+            stringSet.Add(c.Project);
+            stringSet.Add(c.Target);
+            stringSet.Add(c.CommandLine);
+            stringSet.Add(c.WorkingDir);
+            foreach (var i in c.Inputs) stringSet.Add(i);
+            foreach (var o in c.Outputs) stringSet.Add(o);
+        }
+        foreach (var p in graph.ExternalPrefixes)
+            stringSet.Add(p);
+
+        var strings = stringSet.ToArray();
+        var indexOf = new Dictionary<string, int>(strings.Length, StringComparer.Ordinal);
+        for (int i = 0; i < strings.Length; i++) indexOf[strings[i]] = i;
+
+        var fb = new GraphFb
+        {
+            Version = 1,
             BinlogTimestamp = binlogStamp.Ticks,
             RootDir = graph.RootDir,
-            ExternalPrefixes = graph.ExternalPrefixes.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList(),
-            Files = graph.Files.Values.Select(f => new CachedFile { Path = f.Path, Kind = (int)f.Kind }).ToList(),
-            Commands = graph.Commands.Values.Select(c => new CachedCommand
+            Strings = strings,
+            Files = graph.Files.Values.Select(f => new FileFb
             {
-                Id = c.Id, Tool = c.Tool, Project = c.Project, Target = c.Target,
-                Inputs = c.Inputs, Outputs = c.Outputs,
-                CommandLine = c.CommandLine, WorkingDir = c.WorkingDir
-            }).ToList()
+                StrIdx = indexOf[f.Path],
+                Kind = (byte)f.Kind
+            }).ToList(),
+            Commands = graph.Commands.Values.Select(c => new CommandFb
+            {
+                IdIdx = indexOf[c.Id],
+                ToolIdx = indexOf[c.Tool],
+                ProjectIdx = indexOf[c.Project],
+                TargetIdx = indexOf[c.Target],
+                InputIndices = c.Inputs.Select(i => indexOf[i]).ToArray(),
+                OutputIndices = c.Outputs.Select(o => indexOf[o]).ToArray(),
+                CmdlineIdx = indexOf[c.CommandLine],
+                WorkdirIdx = indexOf[c.WorkingDir],
+            }).ToList(),
+            ExternalPrefixIndices = graph.ExternalPrefixes
+                .Select(p => indexOf[p]).ToArray(),
         };
+
+        int maxSize = Serializer.GetMaxSize(fb);
+        byte[] buffer = new byte[maxSize];
+        int written = Serializer.Write(buffer, fb);
         using var fs = File.Create(path);
-        using var gz = new GZipStream(fs, CompressionLevel.Optimal);
-        JsonSerializer.Serialize(gz, cache, BtJsonContext.Default.GraphCache);
+        fs.Write(buffer, 0, written);
     }
 
-    public static GraphCache? Load(string path)
+    /// Returns (binlogTimestamp, graph) or null if the file can't be read.
+    public static (long BinlogTimestamp, BuildGraph Graph)? Load(string path)
     {
-        using var fs = File.OpenRead(path);
-        using var gz = new GZipStream(fs, CompressionMode.Decompress);
-        return JsonSerializer.Deserialize(gz, BtJsonContext.Default.GraphCache);
-    }
+        var bytes = File.ReadAllBytes(path);
+        var fb = Serializer.Parse(bytes);
 
-    public BuildGraph ToGraph()
-    {
-        var graph = new BuildGraph { RootDir = RootDir };
-        foreach (var p in ExternalPrefixes)
-            graph.ExternalPrefixes.Add(p);
-        foreach (var f in Files)
-            graph.Files.TryAdd(f.Path, new FileNode(f.Path, (FileKind)f.Kind));
-        foreach (var c in Commands)
+        if (fb.Strings is not { Count: > 0 } strings) return null;
+        if (fb.Files is not { } fbFiles) return null;
+        if (fb.Commands is not { } fbCommands) return null;
+
+        var graph = new BuildGraph { RootDir = fb.RootDir ?? "" };
+
+        // Rebuild ExternalPrefixes
+        if (fb.ExternalPrefixIndices is { } extPfx)
+            foreach (var idx in extPfx)
+                graph.ExternalPrefixes.Add(strings[idx]);
+
+        // Rebuild Files dictionary
+        foreach (var f in fbFiles)
         {
-            var cmd = new CommandNode(c.Id, c.Tool, c.Project, c.Target, c.Inputs, c.Outputs, c.CommandLine, c.WorkingDir);
+            var p = strings[f.StrIdx];
+            graph.Files.TryAdd(p, new FileNode(p, (FileKind)f.Kind));
+        }
+
+        // Rebuild Commands and relationship maps
+        foreach (var c in fbCommands)
+        {
+            var inputs = c.InputIndices is { } ii
+                ? ii.Select(i => strings[i]).ToList()
+                : new List<string>();
+            var outputs = c.OutputIndices is { } oi
+                ? oi.Select(i => strings[i]).ToList()
+                : new List<string>();
+
+            var cmd = new CommandNode(
+                strings[c.IdIdx], strings[c.ToolIdx],
+                strings[c.ProjectIdx], strings[c.TargetIdx],
+                inputs, outputs,
+                strings[c.CmdlineIdx], strings[c.WorkdirIdx]);
+
             graph.Commands[cmd.Id] = cmd;
             foreach (var input in cmd.Inputs)
                 graph.AddConsumer(input, cmd.Id);
             foreach (var output in cmd.Outputs)
             {
                 graph.FileToProducer.TryAdd(output, cmd.Id);
-                // Rebuild SyntheticProducers index for #include commands
                 if (cmd.Tool.StartsWith("#"))
                 {
                     if (!graph.SyntheticProducers.TryGetValue(output, out var spList))
@@ -65,30 +121,7 @@ class GraphCache
                 }
             }
         }
-        return graph;
+
+        return (fb.BinlogTimestamp, graph);
     }
 }
-
-class CachedFile
-{
-    public string Path { get; set; } = "";
-    public int Kind { get; set; }
-}
-
-class CachedCommand
-{
-    public string Id { get; set; } = "";
-    public string Tool { get; set; } = "";
-    public string Project { get; set; } = "";
-    public string Target { get; set; } = "";
-    public List<string> Inputs { get; set; } = [];
-    public List<string> Outputs { get; set; } = [];
-    public string CommandLine { get; set; } = "";
-    public string WorkingDir { get; set; } = "";
-}
-
-[System.Text.Json.Serialization.JsonSerializableAttribute(typeof(GraphCache))]
-[System.Text.Json.Serialization.JsonSourceGenerationOptions(
-    PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase,
-    WriteIndented = false)]
-partial class BtJsonContext : System.Text.Json.Serialization.JsonSerializerContext { }
