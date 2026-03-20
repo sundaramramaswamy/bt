@@ -203,8 +203,13 @@ static class BuildCommand
         {
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc == null) return (1, "Failed to start process");
+            // Read stdout and stderr concurrently to avoid pipe buffer deadlock.
+            // Sequential ReadToEnd() can hang when the child fills one pipe
+            // while we're blocked draining the other.
+            string stderr = "";
+            var stderrTask = System.Threading.Tasks.Task.Run(() => stderr = proc.StandardError.ReadToEnd());
             var stdout = proc.StandardOutput.ReadToEnd();
-            var stderr = proc.StandardError.ReadToEnd();
+            stderrTask.Wait();
             proc.WaitForExit();
             var output = (stdout + stderr).Trim();
             return (proc.ExitCode, output);
