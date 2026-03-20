@@ -130,7 +130,17 @@ static class BuildCommand
             {
                 if (exitCode == 0)
                 {
-                    foreach (var o in cmd.Outputs) produced.Add(o);
+                    foreach (var o in cmd.Outputs)
+                    {
+                        produced.Add(o);
+                        // Touch output files to ensure mtime > inputs.
+                        // Incremental tools (e.g. link /INCREMENTAL) may skip
+                        // rewriting the output when content is unchanged, leaving
+                        // its mtime older than inputs — making dirty see stale.
+                        var abs = g.ToAbsolute(o);
+                        if (File.Exists(abs))
+                            File.SetLastWriteTimeUtc(abs, DateTime.UtcNow);
+                    }
                 }
                 else
                 {
