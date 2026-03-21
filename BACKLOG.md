@@ -5,10 +5,12 @@
       Done: uses CAExcludePath from binlog
 - [x] ~~FlatBuffers cache~~ — replaced gzip+JSON with FlatSharp (FlatBuffers).
       Sorted string table with int indices; ~700ms → ~20ms cache load.
-- [ ] **NativeAOT** — add `<PublishAot>true</PublishAot>` to eliminate .NET
-      startup (~150ms → ~5ms).  Requires dropping `PackAsTool` (incompatible
-      with AOT; distribute as standalone binary instead).  Source-generated
-      JSON already AOT-safe.  System.CommandLine 2.0.5 + StructuredLogger OK.
+- [ ] **NativeAOT** — spike validated (spike/native-aot, deleted).
+      Managed: ~210–370ms startup, AOT: ~30–70ms.  `bt dirty` warm: 33ms.
+      Binary: 7.5 MB (vs ~66 MB managed single-file).
+      Requires: drop `PackAsTool` + `PublishSingleFile`, replace with
+      `<PublishAot>true</PublishAot>`.  StructuredLogger emits trim
+      warning (IL2104) but works at runtime.  FlatSharp OK.
 - [ ] Parallel mtime stat calls — `Parallel.ForEach` over file set for dirty
       detection; OS metadata cache makes this scale well.
 - [ ] Cached mtimes — store last-known mtimes in cache; on `dirty`, only
