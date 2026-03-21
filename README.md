@@ -71,6 +71,7 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 | `-j <N>` | CPU cores | Max parallel commands for `build` |
 | `-n, --dry-run` | — | Print commands without executing (`build` only) |
 | `--debounce <ms>` | `300` | Debounce delay before rebuilding (`watch` only) |
+| `--run <cmd>` | — | Run a command after each successful rebuild (`watch` only) |
 | `-o <path>` | `compile_commands.json` | Output file for `compiledb` |
 
 ## What's in the graph

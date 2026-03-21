@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [38f7480]
+
+### Fixed
+- **Build deadlock on command failure**: downstream commands waited
+  forever for outputs that would never be produced.  Now transitively
+  skipped with a summary count.
+- **PDB contention in parallel CL**: multiple `cl.exe` processes
+  fighting over a shared `.pdb` file.  `/FS` (force synchronous PDB
+  writes) is now injected automatically.
+- **Watch infinite rebuild loop**: cppwinrt-regenerated headers
+  triggered FileSystemWatcher, causing endless build cycles.  External
+  paths (CAExcludePath) are now filtered in watch.
+- **Watch triggering on editor temps**: Emacs lock files (`.#file`),
+  autosave (`#file#`), Vim swap (`.swp`/`.swo`), and backups (`~`)
+  are now silently skipped.
+- **Progress line wrapping**: ANSI escape codes inflated padding
+  calculation, causing lines to wrap instead of overwriting in place.
+- **`--run` stdout buffering**: output from the post-build command was
+  captured and printed only after exit.  Now inherits the terminal
+  directly for real-time output.
+
+### Changed
+- Dirty detection pre-stats all files in parallel (`Parallel.ForEach`)
+  before the sequential topo walk.
+- Build plan line no longer shows a misleading parallel count.
+
 ## [1c0c6af]
 
 ### Added
