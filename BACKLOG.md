@@ -19,10 +19,9 @@
 - [x] Live progress display for `build` (ninja/FASTBuild-style line refresh)
 
 ## Robustness
-- [ ] **Version-stamp the cache** — embed bt's assembly version in the
-      FlatBuffers cache.  Invalidate on version mismatch so graph-level
-      fixes (e.g. filtering CreateWinMD) take effect without manual
-      `del .bt`.  Currently keyed only on binlog timestamp.
+- [x] ~~Version-stamp the cache~~ — cache version field (int) auto-invalidates
+      on bt upgrade.  Bump `CacheVersion` in GraphCache.cs when graph
+      structure changes.
 
 ## Known limitations
 - System/SDK headers outside repo root are invisible to mtime checks.
