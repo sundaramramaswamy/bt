@@ -51,8 +51,10 @@ var cacheCmd = new Command("cache", "Parse binlog and cache dependency graph");
 
 var watchDebounceOption = new Option<int>("--debounce") { Description = "Debounce delay in ms before triggering build (default: 300)" };
 watchDebounceOption.DefaultValueFactory = _ => 300;
+var watchRunOption = new Option<string>("--run") { Description = "Command to run after successful build" };
 var watchCmd = new Command("watch", "Watch sources and rebuild on change");
 watchCmd.Add(watchDebounceOption);
+watchCmd.Add(watchRunOption);
 
 // -- Wire up --
 var root = new RootCommand("bt — MSBuild incremental build tool");
@@ -192,7 +194,8 @@ watchCmd.SetAction(result =>
         foreach (var alt in new[] { "msbuild_debug.binlog", "msbuild_release.binlog" })
             if (File.Exists(alt)) { binlog = alt; break; }
     var debounceMs = result.GetValue(watchDebounceOption);
-    return WatchCommand.RunWatch(g, Path.GetFullPath(binlog), debounceMs, LoadGraph);
+    var runCmd = result.GetValue(watchRunOption);
+    return WatchCommand.RunWatch(g, Path.GetFullPath(binlog), debounceMs, LoadGraph, runCmd);
 });
 
 return root.Parse(args).Invoke();

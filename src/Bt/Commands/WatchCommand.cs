@@ -1,6 +1,6 @@
 static class WatchCommand
 {
-    public static int RunWatch(BuildGraph graph, string binlogPath, int debounceMs, Func<string, BuildGraph> loadGraph)
+    public static int RunWatch(BuildGraph graph, string binlogPath, int debounceMs, Func<string, BuildGraph> loadGraph, string? runCmd = null)
     {
         var maxJobs = Environment.ProcessorCount;
         var watchExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -80,7 +80,19 @@ static class WatchCommand
                 Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
             Console.Error.WriteLine();
 
-            BuildCommand.RunBuild(graph, resolved.ToArray(), maxJobs, dryRun: false);
+            var rc = BuildCommand.RunBuild(graph, resolved.ToArray(), maxJobs, dryRun: false);
+
+            if (rc == 0 && !string.IsNullOrEmpty(runCmd))
+            {
+                Console.Error.WriteLine();
+                Console.Error.WriteLine($"{Clr.Cyan}▶ {runCmd}{Clr.Reset}");
+                var (exitCode, output) = BuildCommand.ExecuteCommand(
+                    new CommandNode("run", "#run", "", "", [], [], runCmd, graph.RootDir));
+                if (!string.IsNullOrWhiteSpace(output))
+                    Console.Error.WriteLine(output);
+                if (exitCode != 0)
+                    Console.Error.WriteLine($"{Clr.Red}Exit {exitCode}{Clr.Reset}");
+            }
 
             Console.Error.WriteLine($"{Clr.Dim}Waiting for changes...{Clr.Reset}");
 
