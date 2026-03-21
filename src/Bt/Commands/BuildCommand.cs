@@ -73,6 +73,7 @@ static class BuildCommand
 
         var remaining = new List<CommandNode>(plan);
         int failures = 0;
+        int skippedCount = 0;
         int completed = 0;
         int total = plan.Count;
         bool isTty = !Console.IsErrorRedirected;
@@ -151,6 +152,21 @@ static class BuildCommand
                     Console.Error.WriteLine($"  {Clr.Red}✗{Clr.Reset} [{cmd.Tool}] {cmd.Outputs.FirstOrDefault() ?? cmd.Id}  (exit {exitCode})");
                     if (!string.IsNullOrWhiteSpace(output))
                         Console.Error.WriteLine(output);
+
+                    // Mark failed outputs as poisoned so downstream commands
+                    // that depend on them are skipped rather than deadlocking.
+                    var poison = new HashSet<string>(cmd.Outputs, StringComparer.OrdinalIgnoreCase);
+                    var skipped = remaining.Where(c => c.Inputs.Any(i => poison.Contains(i))).ToList();
+                    while (skipped.Count > 0)
+                    {
+                        foreach (var s in skipped)
+                        {
+                            remaining.Remove(s);
+                            skippedCount++;
+                            foreach (var o in s.Outputs) poison.Add(o);
+                        }
+                        skipped = remaining.Where(c => c.Inputs.Any(i => poison.Contains(i))).ToList();
+                    }
                 }
             }
         }
@@ -164,8 +180,10 @@ static class BuildCommand
         if (failures == 0)
             Console.Error.WriteLine($"{Clr.Green}Build succeeded{Clr.Reset} ({plan.Count} commands, {sw.Elapsed.TotalSeconds:F1}s)");
         else
-            Console.Error.WriteLine($"{Clr.Red}Build failed{Clr.Reset} ({failures}/{plan.Count} commands failed, {sw.Elapsed.TotalSeconds:F1}s)");
-
+        {
+            var skippedMsg = skippedCount > 0 ? $", {skippedCount} skipped" : "";
+            Console.Error.WriteLine($"{Clr.Red}Build failed{Clr.Reset} ({failures} failed{skippedMsg}, {plan.Count} total, {sw.Elapsed.TotalSeconds:F1}s)");
+        }
         return failures > 0 ? 1 : 0;
     }
 
