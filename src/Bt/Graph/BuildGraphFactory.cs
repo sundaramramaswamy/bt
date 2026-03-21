@@ -664,7 +664,12 @@ static class BuildGraphFactory
         if (string.IsNullOrEmpty(batchedCmdLine)) return "";
         var parts = SplitCommandLine(batchedCmdLine);
         if (parts.Count <= sourceCount) return batchedCmdLine;
-        var flags = parts.Take(parts.Count - sourceCount);
+        var flags = parts.Take(parts.Count - sourceCount).ToList();
+        // Inject /FS (force synchronous PDB writes) so parallel CL processes
+        // sharing a PDB file don't race.  MSBuild batches N sources into one
+        // cl.exe; bt splits them into parallel invocations that contend.
+        if (!flags.Any(f => f.Equals("/FS", StringComparison.OrdinalIgnoreCase)))
+            flags.Add("/FS");
         return string.Join(" ", flags) + $" /Fo\"{absObj}\" \"{absSource}\"";
     }
 
