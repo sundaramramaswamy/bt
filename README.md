@@ -111,9 +111,9 @@ For a local, self-contained build:
 # Development
 dotnet run --project src/Bt -- dirty
 
-# Release (single-file, self-contained, trimmed)
-dotnet publish src/Bt -c Release -r win-x64    # or win-arm64, linux-x64
-# Output: src/Bt/bin/Release/net8.0/<rid>/publish/Bt.exe
+# Release (NativeAOT — single native binary, no .NET runtime needed)
+dotnet publish src/Bt -c Release -r win-arm64   # or win-x64, linux-x64
+# Output: src/Bt/bin/Release/net8.0/<rid>/publish/bt.exe (~7.5 MB)
 ```
 
 ## Caveats
@@ -126,5 +126,5 @@ dotnet publish src/Bt -c Release -r win-x64    # or win-arm64, linux-x64
 
 ## Requirements
 
-- .NET 8+ SDK (build-time only; published binary is self-contained)
+- .NET 8+ SDK (build-time only; published binary is a native executable)
 - A binary log from a full solution build (`msbuild -bl`)
