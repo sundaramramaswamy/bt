@@ -9,11 +9,12 @@
       ~210–370ms managed).  Requires rd.xml to preserve StructuredLogger
       reflection metadata (Assembly.GetTypes + Activator.CreateInstance
       for binlog deserialization).
-- [ ] Parallel mtime stat calls — `Parallel.ForEach` over file set for dirty
-      detection; OS metadata cache makes this scale well.
-- [ ] Cached mtimes — store last-known mtimes in cache; on `dirty`, only
-      re-stat files whose parent directory mtime changed (NTFS updates dir
-      mtime on child writes).
+- [x] ~~Parallel mtime stat calls~~ — `Parallel.ForEach` over file set before
+      dirty topo-walk; sequential loop does dictionary lookups instead of I/O.
+- [x] ~~Cached mtimes~~ — **won't fix**: NTFS does not update parent directory
+      mtime on child content writes (only on create/delete/rename), so the
+      dir-mtime invalidation strategy would miss edits.  Parallel stat is the
+      correct approach.
 
 ## Features
 - [x] Live progress display for `build` (ninja/FASTBuild-style line refresh)
