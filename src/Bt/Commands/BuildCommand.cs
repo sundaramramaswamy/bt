@@ -41,8 +41,7 @@ static class BuildCommand
             return 0;
         }
 
-        var effectiveJobs = Math.Min(plan.Count, maxJobs);
-        Console.Error.WriteLine($"{Clr.Bold}Build plan: {plan.Count} command{(plan.Count == 1 ? "" : "s")}, {effectiveJobs} parallel{Clr.Reset}");
+        Console.Error.WriteLine($"{Clr.Bold}Build plan: {plan.Count} command{(plan.Count == 1 ? "" : "s")}{Clr.Reset}");
         Console.Error.WriteLine();
 
         if (dryRun)
