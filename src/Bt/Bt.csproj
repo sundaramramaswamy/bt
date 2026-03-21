@@ -14,6 +14,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- StructuredLogger uses Assembly.GetTypes() + Activator.CreateInstance() for binlog
+         deserialization. Preserve all its types and reflection metadata for NativeAOT. -->
+    <TrimmerRootAssembly Include="StructuredLogger" />
+    <RdXmlFile Include="rd.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FlatSharp.Compiler" Version="7.9.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
