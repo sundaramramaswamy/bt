@@ -320,6 +320,28 @@ class BuildGraph
                 if (--inDegree[dep] == 0) queue.Enqueue(dep);
         }
 
+        // Pre-stat all files in parallel: collect every path that could be
+        // checked (inputs + transitive headers + outputs), then batch the
+        // I/O so the OS metadata cache can service them concurrently.
+        var allPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cmd in topoOrder)
+        {
+            foreach (var input in cmd.Inputs)
+            {
+                allPaths.Add(input);
+                CollectSyntheticSources(input, allPaths);
+            }
+            foreach (var output in cmd.Outputs)
+                allPaths.Add(output);
+        }
+
+        var mtimeCache = new System.Collections.Concurrent.ConcurrentDictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase);
+        Parallel.ForEach(allPaths, path =>
+        {
+            var abs = ToAbsolute(path);
+            mtimeCache[path] = File.Exists(abs) ? File.GetLastWriteTimeUtc(abs) : null;
+        });
+
         // Walk topo order, check mtime. Dirty propagates forward.
         var dirtyOutputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<CommandNode>();
@@ -357,20 +379,19 @@ class BuildGraph
                 string? newestInput = null;
                 foreach (var input in allInputs)
                 {
-                    var absPath = ToAbsolute(input);
-                    if (File.Exists(absPath))
+                    var mtime = mtimeCache.GetValueOrDefault(input);
+                    if (mtime is { } t && t > maxInputTime)
                     {
-                        var t = File.GetLastWriteTimeUtc(absPath);
-                        if (t > maxInputTime) { maxInputTime = t; newestInput = input; }
+                        maxInputTime = t;
+                        newestInput = input;
                     }
                 }
 
                 foreach (var output in cmd.Outputs)
                 {
-                    var absPath = ToAbsolute(output);
-                    if (!File.Exists(absPath)) { dirty = true; triggers.Add(output + " (missing)"); break; }
-                    var t = File.GetLastWriteTimeUtc(absPath);
-                    if (maxInputTime > t) { dirty = true; if (newestInput != null) triggers.Add(newestInput); break; }
+                    var mtime = mtimeCache.GetValueOrDefault(output);
+                    if (mtime is null) { dirty = true; triggers.Add(output + " (missing)"); break; }
+                    if (maxInputTime > mtime.Value) { dirty = true; if (newestInput != null) triggers.Add(newestInput); break; }
                 }
             }
 
