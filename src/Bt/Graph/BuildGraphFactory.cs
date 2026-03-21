@@ -177,6 +177,12 @@ static class BuildGraphFactory
             }
             else // Link or Lib — N inputs → 1 output
             {
+                // Skip CreateWinMD: link.exe /WINMD:ONLY produces .winmd, not the .exe
+                // it claims.  This is a metadata-extraction step, not an inner-loop build.
+                var genWinMD = pf.FindChildrenRecursive<Property>(p => p.Name == "GenerateWindowsMetadata")
+                    .FirstOrDefault()?.Value ?? "";
+                if (genWinMD.Equals("Only", StringComparison.OrdinalIgnoreCase)) continue;
+
                 var outFile = pf.FindChildrenRecursive<Property>(p => p.Name == "OutputFile")
                     .FirstOrDefault()?.Value ?? "";
                 outFile = string.IsNullOrEmpty(outFile) ? ""
