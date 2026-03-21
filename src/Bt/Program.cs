@@ -85,7 +85,7 @@ if (args.Length == 1 && args[0] is "--version")
     Console.WriteLine(btVersionShort);
     return 0;
 }
-if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help"))
+if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help" or "help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
     if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb" or "cache" or "watch"))
