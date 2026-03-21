@@ -632,7 +632,7 @@ static class BuildGraphFactory
 
                     // Create synthetic #include command: header → source
                     var cmdId = $"#include#{inclIndex++}";
-                    var cmd = new CommandNode(cmdId, "#include", "", "", [headerRel], [currentSourceRel]);
+                    var cmd = new CommandNode(cmdId, "#include", proj, "", [headerRel], [currentSourceRel]);
                     graph.Commands[cmdId] = cmd;
                     graph.AddConsumer(headerRel, cmdId);
                     // Track in SyntheticProducers (1:N) so mtime walk finds all headers for a source
