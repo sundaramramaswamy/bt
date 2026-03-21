@@ -83,9 +83,15 @@ static class GraphCache
         var fb = Serializer.Parse(bytes);
 
         if (fb.Version != CacheVersion) return null;
-        if (fb.Strings is not { Count: > 0 } strings) return null;
+        if (fb.Strings is not { Count: > 0 } fbStrings) return null;
         if (fb.Files is not { } fbFiles) return null;
         if (fb.Commands is not { } fbCommands) return null;
+
+        // Materialize the string table once so repeated index lookups
+        // return the same object — free interning via the cache array.
+        var strings = new string[fbStrings.Count];
+        for (int i = 0; i < fbStrings.Count; i++)
+            strings[i] = fbStrings[i];
 
         var graph = new BuildGraph { RootDir = fb.RootDir ?? "" };
 
