@@ -93,7 +93,14 @@ static class GraphCache
         for (int i = 0; i < fbStrings.Count; i++)
             strings[i] = fbStrings[i];
 
-        var graph = new BuildGraph { RootDir = fb.RootDir ?? "" };
+        var graph = new BuildGraph
+        {
+            RootDir = fb.RootDir ?? "",
+            Files = new(fbFiles.Count, StringComparer.OrdinalIgnoreCase),
+            Commands = new(fbCommands.Count),
+            FileToConsumers = new(fbFiles.Count, StringComparer.OrdinalIgnoreCase),
+            FileToProducer = new(fbFiles.Count, StringComparer.OrdinalIgnoreCase),
+        };
 
         // Rebuild ExternalPrefixes
         if (fb.ExternalPrefixIndices is { } extPfx)
@@ -110,12 +117,17 @@ static class GraphCache
         // Rebuild Commands and relationship maps
         foreach (var c in fbCommands)
         {
-            var inputs = c.InputIndices is { } ii
-                ? ii.Select(i => strings[i]).ToList()
-                : new List<string>();
-            var outputs = c.OutputIndices is { } oi
-                ? oi.Select(i => strings[i]).ToList()
-                : new List<string>();
+            var ii = c.InputIndices;
+            var inputs = new List<string>(ii?.Count ?? 0);
+            if (ii != null)
+                for (int i = 0; i < ii.Count; i++)
+                    inputs.Add(strings[ii[i]]);
+
+            var oi = c.OutputIndices;
+            var outputs = new List<string>(oi?.Count ?? 0);
+            if (oi != null)
+                for (int i = 0; i < oi.Count; i++)
+                    outputs.Add(strings[oi[i]]);
 
             var cmd = new CommandNode(
                 strings[c.IdIdx], strings[c.ToolIdx],

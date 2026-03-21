@@ -3,24 +3,24 @@ class BuildGraph
     /// Root directory all stored paths are relative to (typically solution dir).
     public required string RootDir { get; init; }
 
-    public Dictionary<string, FileNode> Files { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public Dictionary<string, CommandNode> Commands { get; } = [];
+    public Dictionary<string, FileNode> Files { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, CommandNode> Commands { get; init; } = [];
 
     // file → commands that consume it
-    public Dictionary<string, List<string>> FileToConsumers { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, List<string>> FileToConsumers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     // file → command that produces it
-    public Dictionary<string, string> FileToProducer { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> FileToProducer { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// External include path prefixes (from CAExcludePath). Files under these
     /// are SDK/generated headers — excluded from mtime dirty checking.
-    public HashSet<string> ExternalPrefixes { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> ExternalPrefixes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// Per-project environment variables extracted from SetEnv tasks in the binlog.
     /// Key: project file name (e.g. "XaBench.vcxproj"), Value: env var name → value.
-    public Dictionary<string, Dictionary<string, string>> ProjectEnv { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, Dictionary<string, string>> ProjectEnv { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     // file → synthetic (#include) commands that produce it (1:N, unlike FileToProducer)
-    public Dictionary<string, List<string>> SyntheticProducers { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, List<string>> SyntheticProducers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// Check if a file path is under an external include prefix.
     public bool IsExternal(string relativePath) =>
