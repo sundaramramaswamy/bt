@@ -5,6 +5,7 @@ using FlatSharp;
 /// Uses a sorted string table with integer indices for compact storage.
 static class GraphCache
 {
+    const int CacheVersion = 2;
     static readonly ISerializer<GraphFb> Serializer = GraphFb.Serializer;
 
     public static void Save(string path, BuildGraph graph, DateTime binlogStamp)
@@ -38,7 +39,7 @@ static class GraphCache
 
         var fb = new GraphFb
         {
-            Version = 1,
+            Version = CacheVersion,
             BinlogTimestamp = binlogStamp.Ticks,
             RootDir = graph.RootDir,
             Strings = strings,
@@ -81,6 +82,7 @@ static class GraphCache
         var bytes = File.ReadAllBytes(path);
         var fb = Serializer.Parse(bytes);
 
+        if (fb.Version != CacheVersion) return null;
         if (fb.Strings is not { Count: > 0 } strings) return null;
         if (fb.Files is not { } fbFiles) return null;
         if (fb.Commands is not { } fbCommands) return null;
