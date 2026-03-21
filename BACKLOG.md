@@ -18,6 +18,12 @@
 ## Features
 - [x] Live progress display for `build` (ninja/FASTBuild-style line refresh)
 
+## Robustness
+- [ ] **Version-stamp the cache** — embed bt's assembly version in the
+      FlatBuffers cache.  Invalidate on version mismatch so graph-level
+      fixes (e.g. filtering CreateWinMD) take effect without manual
+      `del .bt`.  Currently keyed only on binlog timestamp.
+
 ## Known limitations
 - System/SDK headers outside repo root are invisible to mtime checks.
   Toolchain updates (e.g. VS update changing `stdio.h`) require a full
