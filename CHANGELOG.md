@@ -5,12 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
-## [bd14db9]
+## [1c0c6af]
 
 ### Added
 - `bt help` as alias for `bt --help`.
 - `bt watch --run <cmd>` — run a command after each successful rebuild.
 - Cache version stamping (v2): auto-invalidates on bt upgrade.
+- NativeAOT publish — ~14 MB native binary, ~30–70 ms startup
+  (was ~210–370 ms managed).
 
 ### Fixed
 - **CreateWinMD producing wrong binary**: `link.exe /WINMD:ONLY`

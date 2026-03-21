@@ -113,7 +113,7 @@ dotnet run --project src/Bt -- dirty
 
 # Release (NativeAOT — single native binary, no .NET runtime needed)
 dotnet publish src/Bt -c Release -r win-arm64   # or win-x64, linux-x64
-# Output: src/Bt/bin/Release/net8.0/<rid>/publish/bt.exe (~7.5 MB)
+# Output: src/Bt/bin/Release/net8.0/<rid>/publish/bt.exe (~14 MB)
 ```
 
 ## Caveats

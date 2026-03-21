@@ -5,9 +5,10 @@
       Done: uses CAExcludePath from binlog
 - [x] ~~FlatBuffers cache~~ — replaced gzip+JSON with FlatSharp (FlatBuffers).
       Sorted string table with int indices; ~700ms → ~20ms cache load.
-- [x] ~~NativeAOT~~ — 7.5 MB native binary, ~30–70ms startup (was
-      ~210–370ms managed).  StructuredLogger emits trim warning IL2104
-      but works at runtime.
+- [x] ~~NativeAOT~~ — ~14 MB native binary, ~30–70ms startup (was
+      ~210–370ms managed).  Requires rd.xml to preserve StructuredLogger
+      reflection metadata (Assembly.GetTypes + Activator.CreateInstance
+      for binlog deserialization).
 - [ ] Parallel mtime stat calls — `Parallel.ForEach` over file set for dirty
       detection; OS metadata cache makes this scale well.
 - [ ] Cached mtimes — store last-known mtimes in cache; on `dirty`, only
