@@ -90,7 +90,8 @@ static class BuildCommand
                     var counter = $"[{completed}/{total}]";
                     var shortFile = Path.GetFileName(file);
                     var line = $"\r{Clr.Bold}{counter}{Clr.Reset} {sym}{Clr.Reset} [{tool}] {shortFile}";
-                    Console.Error.Write(line + new string(' ', Math.Max(0, Console.WindowWidth - line.Length + 20)));
+                    var pad = Math.Max(0, Console.WindowWidth - Clr.VisibleLength(line));
+                    Console.Error.Write(line + new string(' ', pad));
                     if (done && failed)
                         Console.Error.WriteLine();
                 }

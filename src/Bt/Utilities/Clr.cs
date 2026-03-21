@@ -19,4 +19,21 @@ static class Clr
     public static string Magenta => _enabled ? "\x1b[35m" : "";
     public static string Cyan    => _enabled ? "\x1b[36m" : "";
     public static string Dim     => _enabled ? "\x1b[2m"  : "";
+
+    /// Visible length of a string after stripping ANSI escape sequences and \r.
+    public static int VisibleLength(string s)
+    {
+        int len = 0;
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] == '\x1b' && i + 1 < s.Length && s[i + 1] == '[')
+            {
+                i += 2;
+                while (i < s.Length && s[i] != 'm') i++;
+                continue;
+            }
+            if (s[i] != '\r') len++;
+        }
+        return len;
+    }
 }
