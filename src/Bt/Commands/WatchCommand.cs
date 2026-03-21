@@ -109,6 +109,12 @@ static class WatchCommand
             var ext = Path.GetExtension(fullPath);
             if (!watchExts.Contains(ext)) return;
 
+            // Skip editor temporaries: Emacs (.#file, #file#), Vim (.swp/.swo), backups (~)
+            var fileName = Path.GetFileName(fullPath);
+            if (fileName.StartsWith(".#") || fileName.StartsWith('#') ||
+                fileName.EndsWith('~') || fileName.EndsWith(".swp") || fileName.EndsWith(".swo"))
+                return;
+
             var relativePath = Path.GetRelativePath(graph.RootDir, fullPath);
 
             // Skip generated/SDK headers — their changes are build output,
