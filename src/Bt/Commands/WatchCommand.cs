@@ -114,6 +114,11 @@ static class WatchCommand
 
             var relativePath = Path.GetRelativePath(graph.RootDir, fullPath);
 
+            // Skip generated/SDK headers — their changes are build output,
+            // not user edits.  Without this, builds that regenerate headers
+            // (e.g. cppwinrt) trigger an infinite rebuild loop.
+            if (graph.IsExternal(relativePath)) return;
+
             lock (pendingLock)
             {
                 pending.Add(relativePath);
