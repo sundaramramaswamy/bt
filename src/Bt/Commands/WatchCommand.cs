@@ -86,10 +86,7 @@ static class WatchCommand
             {
                 Console.Error.WriteLine();
                 Console.Error.WriteLine($"{Clr.Cyan}▶ {runCmd}{Clr.Reset}");
-                var (exitCode, output) = BuildCommand.ExecuteCommand(
-                    new CommandNode("run", "#run", "", "", [], [], runCmd, graph.RootDir));
-                if (!string.IsNullOrWhiteSpace(output))
-                    Console.Error.WriteLine(output);
+                var exitCode = RunPassthrough(runCmd, graph.RootDir);
                 if (exitCode != 0)
                     Console.Error.WriteLine($"{Clr.Red}Exit {exitCode}{Clr.Reset}");
             }
@@ -166,5 +163,29 @@ static class WatchCommand
         debounceTimer?.Dispose();
         Console.Error.WriteLine($"\n{Clr.Dim}Watch stopped.{Clr.Reset}");
         return 0;
+    }
+
+    /// Run a command with inherited stdin/stdout/stderr (no capture).
+    static int RunPassthrough(string cmdLine, string workingDir)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe",
+            Arguments = $"/c {cmdLine}",
+            WorkingDirectory = workingDir,
+            UseShellExecute = false,
+        };
+        try
+        {
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return 1;
+            proc.WaitForExit();
+            return proc.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"{Clr.Red}{ex.Message}{Clr.Reset}");
+            return 1;
+        }
     }
 }
