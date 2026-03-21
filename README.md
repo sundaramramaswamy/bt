@@ -116,6 +116,14 @@ dotnet publish src/Bt -c Release -r win-x64    # or win-arm64, linux-x64
 # Output: src/Bt/bin/Release/net8.0/<rid>/publish/Bt.exe
 ```
 
+## Caveats
+
+- **CreateWinMD is skipped.** C++/WinRT projects run `link.exe /WINMD:ONLY`
+  (the `CreateWinMD` target) to extract `.winmd` metadata before the real link.
+  `bt` skips this step — it's a structural metadata extraction, not an
+  inner-loop build concern.  If you add/remove/rename WinRT runtime classes,
+  do a full `msbuild` rebuild.
+
 ## Requirements
 
 - .NET 8+ SDK (build-time only; published binary is self-contained)
