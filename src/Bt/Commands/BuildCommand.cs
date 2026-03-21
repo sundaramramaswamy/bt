@@ -50,6 +50,8 @@ static class BuildCommand
             foreach (var cmd in plan)
             {
                 Console.Error.WriteLine($"{Clr.Cyan}[{cmd.Tool}]{Clr.Reset} {Clr.Dim}{cmd.Project}{Clr.Reset}");
+                if (!string.IsNullOrEmpty(cmd.WorkingDir))
+                    Console.Error.WriteLine($"  {Clr.Dim}cd {cmd.WorkingDir}{Clr.Reset}");
                 Console.WriteLine(cmd.CommandLine);
                 Console.Error.WriteLine();
             }
