@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [459dfd1]
+
+### Fixed
+- **Watch missed pre-existing dirty files**: `bt watch` only caught
+  changes after startup.  Now runs an initial mtime-based dirty check
+  (and `--run` if the build succeeds) before entering the watch loop.
+- **False `pch.cpp → *.obj` edges in graph**: `.pch` was classified
+  as a hidden intermediate, so the graph walk collapsed it and drew
+  direct edges from `pch.cpp` to every object file.  `.pch` is now
+  dev-visible, correctly showing `pch.cpp → pch.pch → *.obj`.
+
 ## [38f7480]
 
 ### Fixed
