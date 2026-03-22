@@ -4,17 +4,16 @@ static class CompileDbCommand
 {
     public static int CompileCommands(BuildGraph g, string? outputPath)
     {
-        var entries = g.Commands.Values
-            .Where(c => c.Tool == "CL" && !string.IsNullOrEmpty(c.CommandLine))
-            .Select(c =>
-            {
-                var file = c.Inputs.Count > 0
-                    ? Path.GetFullPath(Path.Combine(g.RootDir, c.Inputs[0]))
-                    : "";
-                var dir = !string.IsNullOrEmpty(c.WorkingDir) ? c.WorkingDir : g.RootDir;
-                return new CompileCommandEntry { Directory = dir, Command = c.CommandLine, File = file };
-            })
-            .ToList();
+        var entries = new List<CompileCommandEntry>();
+        foreach (var c in g.Commands.Values)
+        {
+            if (c.Tool != "CL" || string.IsNullOrEmpty(c.CommandLine)) continue;
+            var file = c.Inputs.Count > 0
+                ? Path.GetFullPath(Path.Combine(g.RootDir, c.Inputs[0]))
+                : "";
+            var dir = !string.IsNullOrEmpty(c.WorkingDir) ? c.WorkingDir : g.RootDir;
+            entries.Add(new CompileCommandEntry { Directory = dir, Command = c.CommandLine, File = file });
+        }
 
         var outFile = outputPath ?? Path.Combine(g.RootDir, "compile_commands.json");
         using var fs = File.Create(outFile);

@@ -21,7 +21,8 @@ static class GraphCommand
         if (filterProjects is { Length: > 0 })
         {
             // Match projects by name, ignoring .vcxproj/.csproj extensions.
-            var allProjects = g.Commands.Values.Select(c => c.Project).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var allProjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in g.Commands.Values) allProjects.Add(c.Project);
             var matchedProjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var filter in filterProjects)
                 foreach (var p in allProjects)
@@ -40,18 +41,31 @@ static class GraphCommand
             {
                 Console.Error.WriteLine($"No commands found for project(s): {string.Join(", ", filterProjects)}");
                 Console.Error.WriteLine("Available projects:");
-                foreach (var p in allProjects.Where(p => !string.IsNullOrEmpty(p)).OrderBy(p => p))
+                var sortedProjects = new List<string>();
+                foreach (var p in allProjects)
+                    if (!string.IsNullOrEmpty(p)) sortedProjects.Add(p);
+                sortedProjects.Sort(StringComparer.OrdinalIgnoreCase);
+                foreach (var p in sortedProjects)
                     Console.Error.WriteLine($"  {Path.GetFileNameWithoutExtension(p)}");
                 return 1;
             }
-            allowed = allowed == null ? projFiles : new HashSet<string>(allowed.Intersect(projFiles, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+            if (allowed == null)
+                allowed = projFiles;
+            else
+            {
+                var intersection = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var f in allowed)
+                    if (projFiles.Contains(f)) intersection.Add(f);
+                allowed = intersection;
+            }
         }
 
         // Developer-centric graph: sources, intermediates (.obj), and outputs are visible.
         // Only hidden intermediates (.pch, .res) are collapsed — edges skip through them.
-        var visible = g.Files.Values
-            .Where(f => FileKinds.IsDevVisible(f.Kind) && (allowed == null || allowed.Contains(f.Path)))
-            .ToList();
+        var visible = new List<FileNode>();
+        foreach (var f in g.Files.Values)
+            if (FileKinds.IsDevVisible(f.Kind) && (allowed == null || allowed.Contains(f.Path)))
+                visible.Add(f);
 
         // Walk forward from each visible file to its nearest visible outputs.
         var edges = new HashSet<(string src, string tool, string output)>();
@@ -144,11 +158,12 @@ static class GraphCommand
         if (!g.FileToProducer.TryGetValue(filePath, out var producerId)) return;
         if (!g.Commands.TryGetValue(producerId, out var cmd)) return;
 
-        var inputs = cmd.Inputs.OrderBy(i => i, StringComparer.OrdinalIgnoreCase).ToList();
-        for (int i = 0; i < inputs.Count; i++)
+        var sortedInputs = new List<string>(cmd.Inputs);
+        sortedInputs.Sort(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < sortedInputs.Count; i++)
         {
-            var input = inputs[i];
-            var isLast = i == inputs.Count - 1;
+            var input = sortedInputs[i];
+            var isLast = i == sortedInputs.Count - 1;
             var branch = isLast ? "└── " : "├── ";
             var cont   = isLast ? "    " : "│   ";
 

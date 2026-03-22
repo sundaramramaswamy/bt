@@ -6,11 +6,13 @@ static class WatchCommand
         var watchExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { ".c", ".cc", ".cpp", ".cxx", ".inl", ".h", ".hh", ".hxx", ".hpp", ".idl" };
 
-        // Count watched files in graph
-        var watchedCount = graph.Files.Values.Count(f => watchExts.Contains(Path.GetExtension(f.Path)));
-        var projects = graph.Commands.Values.Select(c => c.Project).Where(p => !string.IsNullOrEmpty(p))
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        Console.Error.WriteLine($"{Clr.Bold}Watching{Clr.Reset} {Clr.Cyan}{watchedCount}{Clr.Reset} files in {Clr.Cyan}{projects.Count}{Clr.Reset} projects {Clr.Dim}(debounce {debounceMs}ms, {maxJobs} cores){Clr.Reset}");
+        var watchedCount = 0;
+        foreach (var f in graph.Files.Values)
+            if (watchExts.Contains(Path.GetExtension(f.Path))) watchedCount++;
+        var projectSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in graph.Commands.Values)
+            if (!string.IsNullOrEmpty(c.Project)) projectSet.Add(c.Project);
+        Console.Error.WriteLine($"{Clr.Bold}Watching{Clr.Reset} {Clr.Cyan}{watchedCount}{Clr.Reset} files in {Clr.Cyan}{projectSet.Count}{Clr.Reset} projects {Clr.Dim}(debounce {debounceMs}ms, {maxJobs} cores){Clr.Reset}");
         Console.Error.WriteLine($"{Clr.Dim}Press Ctrl+C to stop.{Clr.Reset}");
         Console.Error.WriteLine();
 
@@ -51,7 +53,9 @@ static class WatchCommand
                 {
                     graph = loadGraph(binlogPath);
                     binlogStamp = currentBinlogStamp;
-                    watchedCount = graph.Files.Values.Count(f => watchExts.Contains(Path.GetExtension(f.Path)));
+                    watchedCount = 0;
+                    foreach (var f in graph.Files.Values)
+                        if (watchExts.Contains(Path.GetExtension(f.Path))) watchedCount++;
                     Console.Error.WriteLine($"{Clr.Dim}Reloaded: {watchedCount} files{Clr.Reset}");
                 }
                 catch (Exception ex)
@@ -76,7 +80,9 @@ static class WatchCommand
 
             var timestamp = DateTime.Now.ToString("HH:mm:ss");
             Console.Error.WriteLine($"\n{Clr.Bold}--- {timestamp} ---{Clr.Reset}");
-            foreach (var f in resolved.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            var sortedResolved = new List<string>(resolved);
+            sortedResolved.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in sortedResolved)
                 Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
             Console.Error.WriteLine();
 

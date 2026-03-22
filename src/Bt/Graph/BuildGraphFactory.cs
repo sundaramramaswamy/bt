@@ -6,11 +6,11 @@ static class BuildGraphFactory
     public static BuildGraph FromBinlog(Build build)
     {
         // Discover solution root as common ancestor of all project directories
-        var projectDirs = build.FindChildrenRecursive<Project>()
-            .Where(p => p.ProjectFile != null)
-            .Select(p => Path.GetDirectoryName(Path.GetFullPath(p.ProjectFile))!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var projectDirSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in build.FindChildrenRecursive<Project>())
+            if (p.ProjectFile != null)
+                projectDirSet.Add(Path.GetDirectoryName(Path.GetFullPath(p.ProjectFile))!);
+        var projectDirs = new List<string>(projectDirSet);
         var rootDir = GetCommonAncestor(projectDirs);
 
         var graph = new BuildGraph { RootDir = rootDir };
@@ -21,12 +21,10 @@ static class BuildGraphFactory
         // Also extract CAExcludePath for mtime-skip prefixes.
         foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name == "SetEnv"))
         {
-            var pf = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
-            var name = pf?.FindChildrenRecursive<Property>(p => p.Name == "Name")
-                .FirstOrDefault()?.Value;
+            var pf = FindChildFolder(task.Children, "Parameters");
+            var name = pf == null ? null : PropValue(pf, "Name", null!);
             if (string.IsNullOrEmpty(name)) continue;
-            var value = pf?.FindChildrenRecursive<Property>(p => p.Name == "Value")
-                .FirstOrDefault()?.Value ?? "";
+            var value = pf == null ? "" : PropValue(pf, "Value");
             var projNode = task.GetNearestParent<Project>();
             var projFile = projNode?.ProjectFile != null
                 ? Path.GetFileName(projNode.ProjectFile) : "";
@@ -73,7 +71,7 @@ static class BuildGraphFactory
                 ? Path.GetDirectoryName(Path.GetFullPath(projNode.ProjectFile)) ?? ""
                 : "";
             var target = task.GetNearestParent<Target>()?.Name ?? "unknown";
-            var pf = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            var pf = FindChildFolder(task.Children, "Parameters");
             if (pf == null) continue;
 
             // Normalize tool names at the boundary — MSBuild may report any casing
@@ -81,13 +79,8 @@ static class BuildGraphFactory
             var toolName = task.Name.ToUpperInvariant();
             // Extract the full command line from binlog (available for CL, Link, Lib, MIDL)
             // CommandLineArguments is a child of the task, not inside the Parameters folder.
-            var cmdLineRaw = (task.FindChildrenRecursive<Property>(p => p.Name == "CommandLineArguments")
-                .FirstOrDefault()?.Value ?? "").ReplaceLineEndings(" ").Trim();
-            var sources = pf.Children.OfType<Parameter>()
-                .FirstOrDefault(p => p.Name == "Sources")
-                ?.Children.OfType<Item>()
-                .Select(i => graph.ToRelative(ResolveAbsolute(projDir, i.Text)))
-                .ToList() ?? [];
+            var cmdLineRaw = PropValue(task, "CommandLineArguments").ReplaceLineEndings(" ").Trim();
+            var sources = ParameterItems(pf, "Sources", text => graph.ToRelative(ResolveAbsolute(projDir, text)));
 
             // MIDL uses a Source property (singular), not Sources items
             if (sources.Count == 0 && toolName != "MIDL") continue;
@@ -96,8 +89,7 @@ static class BuildGraphFactory
             {
                 // CL batches N sources but the relationship is 1:1 (each .cpp → its .obj).
                 // Split into individual commands to keep the graph accurate.
-                var objFileName = pf.FindChildrenRecursive<Property>(p => p.Name == "ObjectFileName")
-                    .FirstOrDefault()?.Value ?? "";
+                var objFileName = PropValue(pf, "ObjectFileName");
                 var absObjFileName = ResolveAbsolute(projDir, objFileName);
                 // ObjectFileName ending with \ or / is a directory; otherwise it's a specific file.
                 bool objIsDir = objFileName.Length == 0
@@ -105,8 +97,7 @@ static class BuildGraphFactory
                 if (objIsDir) objDirsByProject.TryAdd(proj, absObjFileName);
 
                 // PCH detection: /Yc = create, /Yu = use
-                var pchOutFile = pf.FindChildrenRecursive<Property>(p => p.Name == "PrecompiledHeaderOutputFile")
-                    .FirstOrDefault()?.Value ?? "";
+                var pchOutFile = PropValue(pf, "PrecompiledHeaderOutputFile");
                 var pchPath = string.IsNullOrEmpty(pchOutFile) ? ""
                     : graph.ToRelative(ResolveAbsolute(projDir, pchOutFile));
                 bool createsYc = cmdLineRaw.Contains("/Yc");
@@ -157,13 +148,11 @@ static class BuildGraphFactory
             else if (toolName == "MIDL")
             {
                 // MIDL compiles one .idl at a time; Source is a property, not items.
-                var srcProp = pf.FindChildrenRecursive<Property>(p => p.Name == "Source")
-                    .FirstOrDefault()?.Value ?? "";
+                var srcProp = PropValue(pf, "Source");
                 if (string.IsNullOrEmpty(srcProp)) continue;
                 var src = graph.ToRelative(ResolveAbsolute(projDir, srcProp));
 
-                var metaProp = pf.FindChildrenRecursive<Property>(p => p.Name == "MetadataFileName")
-                    .FirstOrDefault()?.Value ?? "";
+                var metaProp = PropValue(pf, "MetadataFileName");
                 if (string.IsNullOrEmpty(metaProp)) continue;
                 var meta = graph.ToRelative(ResolveAbsolute(projDir, metaProp));
 
@@ -179,12 +168,10 @@ static class BuildGraphFactory
             {
                 // Skip CreateWinMD: link.exe /WINMD:ONLY produces .winmd, not the .exe
                 // it claims.  This is a metadata-extraction step, not an inner-loop build.
-                var genWinMD = pf.FindChildrenRecursive<Property>(p => p.Name == "GenerateWindowsMetadata")
-                    .FirstOrDefault()?.Value ?? "";
+                var genWinMD = PropValue(pf, "GenerateWindowsMetadata");
                 if (genWinMD.Equals("Only", StringComparison.OrdinalIgnoreCase)) continue;
 
-                var outFile = pf.FindChildrenRecursive<Property>(p => p.Name == "OutputFile")
-                    .FirstOrDefault()?.Value ?? "";
+                var outFile = PropValue(pf, "OutputFile");
                 outFile = string.IsNullOrEmpty(outFile) ? ""
                     : graph.ToRelative(ResolveAbsolute(projDir, outFile));
                 if (string.IsNullOrEmpty(outFile)) continue;
@@ -213,8 +200,9 @@ static class BuildGraphFactory
             var eval = addItem.GetNearestParent<ProjectEvaluation>();
             var pd = eval?.ProjectFile != null
                 ? Path.GetDirectoryName(Path.GetFullPath(eval.ProjectFile)) ?? "" : "";
-            foreach (var item in addItem.Children.OfType<Item>())
+            foreach (var child in addItem.Children)
             {
+                if (child is not Item item) continue;
                 var abs = ResolveAbsolute(pd, item.Text);
                 var rel = Path.GetRelativePath(graph.RootDir, abs);
                 graph.PrimeCaseCacheEntry(abs, rel);
@@ -236,8 +224,9 @@ static class BuildGraphFactory
 
                 if (!clCmdsByProject.TryGetValue(proj, out var projCmds)) continue;
 
-                foreach (var item in addItem.Children.OfType<Item>())
+                foreach (var child2 in addItem.Children)
                 {
+                    if (child2 is not Item item) continue;
                     var headerPath = graph.ToRelative(ResolveAbsolute(projDir2, item.Text));
                     graph.Files.TryAdd(headerPath, new FileNode(headerPath, FileKinds.Classify(headerPath)));
 
@@ -260,33 +249,29 @@ static class BuildGraphFactory
                 ? Path.GetDirectoryName(Path.GetFullPath(projNode.ProjectFile)) ?? ""
                 : "";
             var target = task.GetNearestParent<Target>()?.Name ?? "unknown";
-            var pf = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            var pf = FindChildFolder(task.Children, "Parameters");
             if (pf == null) continue;
 
             // Gather input .xaml files
             var xamlInputs = new List<string>();
             foreach (var paramName in new[] { "XamlPages", "XamlApplications" })
-            {
-                var items = pf.Children.OfType<Parameter>()
-                    .FirstOrDefault(p => p.Name == paramName)
-                    ?.Children.OfType<Item>()
-                    .Select(i => graph.ToRelative(ResolveAbsolute(projDir, i.Text)));
-                if (items != null) xamlInputs.AddRange(items);
-            }
+                xamlInputs.AddRange(ParameterItems(pf, paramName, text => graph.ToRelative(ResolveAbsolute(projDir, text))));
             if (xamlInputs.Count == 0) continue;
 
             // Gather output files from OutputItems
-            var of = task.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "OutputItems");
+            var of = FindChildFolder(task.Children, "OutputItems");
             var allOutputs = new List<string>();
             if (of != null)
             {
                 foreach (var paramName in new[] { "_GeneratedCodeFiles", "_GeneratedXbfFiles" })
                 {
-                    var items = of.Children.OfType<NamedNode>()
-                        .Where(n => n.Name == paramName)
-                        .SelectMany(n => n.Children.OfType<Item>())
-                        .Select(i => graph.ToRelative(ResolveAbsolute(projDir, i.Text)));
-                    allOutputs.AddRange(items);
+                    for (int ci = 0; ci < of.Children.Count; ci++)
+                    {
+                        if (of.Children[ci] is not NamedNode nn || nn.Name != paramName) continue;
+                        for (int ji = 0; ji < nn.Children.Count; ji++)
+                            if (nn.Children[ji] is Item item)
+                                allOutputs.Add(graph.ToRelative(ResolveAbsolute(projDir, item.Text)));
+                    }
                 }
             }
             if (allOutputs.Count == 0) continue;
@@ -297,12 +282,14 @@ static class BuildGraphFactory
             {
                 var stem = Path.GetFileNameWithoutExtension(xaml);
                 var fullStem = Path.GetFileName(xaml);
-                var matched = allOutputs
-                    .Where(o => {
-                        var fn = Path.GetFileName(o);
-                        return fn.StartsWith(fullStem + ".", StringComparison.OrdinalIgnoreCase)
-                            || fn.StartsWith(stem + ".xbf", StringComparison.OrdinalIgnoreCase);
-                    }).ToList();
+                var matched = new List<string>();
+                foreach (var o in allOutputs)
+                {
+                    var fn = Path.GetFileName(o);
+                    if (fn.StartsWith(fullStem + ".", StringComparison.OrdinalIgnoreCase)
+                        || fn.StartsWith(stem + ".xbf", StringComparison.OrdinalIgnoreCase))
+                        matched.Add(o);
+                }
                 if (matched.Count == 0) continue;
 
                 foreach (var m in matched) sharedOutputs.Remove(m);
@@ -339,12 +326,16 @@ static class BuildGraphFactory
         }
 
         // Convention: cppwinrt generates .g.h/.g.cpp from .winmd produced by MIDL.
-        foreach (var cmd in graph.Commands.Values.Where(c => c.Tool == "MIDL").ToList())
+        var midlCmds = new List<CommandNode>();
+        foreach (var c in graph.Commands.Values)
+            if (c.Tool == "MIDL") midlCmds.Add(c);
+        foreach (var cmd in midlCmds)
         {
-            var projDir2 = build.FindChildrenRecursive<Project>(p => p.Name == cmd.Project)
-                .FirstOrDefault()?.ProjectFile;
-            if (projDir2 == null) continue;
-            var absDir = Path.GetDirectoryName(Path.GetFullPath(projDir2)) ?? "";
+            string? projFile = null;
+            foreach (var p in build.FindChildrenRecursive<Project>(p => p.Name == cmd.Project))
+            { projFile = p.ProjectFile; break; }
+            if (projFile == null) continue;
+            var absDir = Path.GetDirectoryName(Path.GetFullPath(projFile)) ?? "";
 
             foreach (var idlPath in cmd.Inputs)
             {
@@ -411,17 +402,14 @@ static class BuildGraphFactory
             var projDir4 = projNode4?.ProjectFile != null
                 ? Path.GetDirectoryName(Path.GetFullPath(projNode4.ProjectFile)) ?? ""
                 : "";
-            var pf4 = priTask.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
-            var outFile = pf4?.FindChildrenRecursive<Property>(p => p.Name == "OutputFileName")
-                .FirstOrDefault()?.Value;
+            var pf4 = FindChildFolder(priTask.Children, "Parameters");
+            var outFile = pf4 == null ? null : PropValue(pf4, "OutputFileName", null!);
             if (outFile == null) continue;
 
             var priRel = graph.ToRelative(ResolveAbsolute(projDir4, outFile));
             var target4 = priTask.GetNearestParent<Target>()?.Name ?? "unknown";
             var cmdId = $"makepri#{cmdIndex++}:{proj4}/{target4}";
-            var priCmdLine = (priTask.FindChildrenRecursive<Property>(
-                p => p.Name == "CommandLineArguments").FirstOrDefault()?.Value ?? "")
-                .ReplaceLineEndings(" ").Trim();
+            var priCmdLine = PropValue(priTask, "CommandLineArguments").ReplaceLineEndings(" ").Trim();
             var cmd = new CommandNode(cmdId, "makepri", proj4, target4, [], [priRel])
             {
                 CommandLine = priCmdLine,
@@ -441,15 +429,11 @@ static class BuildGraphFactory
             var projDir5 = projNode5?.ProjectFile != null
                 ? Path.GetDirectoryName(Path.GetFullPath(projNode5.ProjectFile)) ?? ""
                 : "";
-            var pf5 = manTask.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            var pf5 = FindChildFolder(manTask.Children, "Parameters");
             if (pf5 == null) continue;
 
-            var inputItems = pf5.FindChildrenRecursive<Parameter>(p => p.Name == "AppxManifestInput")
-                .FirstOrDefault()?.Children.OfType<Item>()
-                .Select(i => graph.ToRelative(ResolveAbsolute(projDir5, i.Text)))
-                .ToList() ?? [];
-            var outFile = pf5.FindChildrenRecursive<Property>(p => p.Name == "AppxManifestOutput")
-                .FirstOrDefault()?.Value;
+            var inputItems = ParameterItems(pf5, "AppxManifestInput", text => graph.ToRelative(ResolveAbsolute(projDir5, text)));
+            var outFile = PropValue(pf5, "AppxManifestOutput", null!);
             if (outFile == null) continue;
 
             var outRel = graph.ToRelative(ResolveAbsolute(projDir5, outFile));
@@ -474,22 +458,18 @@ static class BuildGraphFactory
             var projDir7 = projNode7?.ProjectFile != null
                 ? Path.GetDirectoryName(Path.GetFullPath(projNode7.ProjectFile)) ?? ""
                 : "";
-            var pf7 = copyTask.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            var pf7 = FindChildFolder(copyTask.Children, "Parameters");
             if (pf7 == null) continue;
 
-            var srcItems = pf7.FindChildrenRecursive<Parameter>(p => p.Name == "SourceFiles")
-                .FirstOrDefault()?.Children.OfType<Item>()
-                .Select(i => i.Text).ToList();
-            var dstItems = pf7.FindChildrenRecursive<Parameter>(p => p.Name == "DestinationFiles")
-                .FirstOrDefault()?.Children.OfType<Item>()
-                .Select(i => i.Text).ToList();
+            var srcParam = FirstChild<Parameter>(pf7.Children, p => p.Name == "SourceFiles");
+            var srcItems = srcParam != null ? ItemTexts(srcParam.Children) : null;
+            var dstParam = FirstChild<Parameter>(pf7.Children, p => p.Name == "DestinationFiles");
+            var dstItems = dstParam != null ? ItemTexts(dstParam.Children) : null;
 
             if (srcItems == null || srcItems.Count == 0)
             {
-                var srcProp = pf7.FindChildrenRecursive<Property>(p => p.Name == "SourceFiles")
-                    .FirstOrDefault()?.Value;
-                var dstProp = pf7.FindChildrenRecursive<Property>(p => p.Name == "DestinationFiles")
-                    .FirstOrDefault()?.Value;
+                var srcProp = PropValue(pf7, "SourceFiles", null!);
+                var dstProp = PropValue(pf7, "DestinationFiles", null!);
                 if (srcProp != null && dstProp != null)
                 {
                     srcItems = [srcProp];
@@ -529,28 +509,26 @@ static class BuildGraphFactory
             var projDir6 = projNode6?.ProjectFile != null
                 ? Path.GetDirectoryName(Path.GetFullPath(projNode6.ProjectFile)) ?? ""
                 : "";
-            var pf6 = recipeTask.Children.OfType<Folder>().FirstOrDefault(f => f.Name == "Parameters");
+            var pf6 = FindChildFolder(recipeTask.Children, "Parameters");
             if (pf6 == null) continue;
 
-            var recipeFile = pf6.FindChildrenRecursive<Property>(p => p.Name == "RecipeFile")
-                .FirstOrDefault()?.Value;
+            var recipeFile = PropValue(pf6, "RecipeFile", null!);
             if (recipeFile == null) continue;
 
             var recipeRel = graph.ToRelative(ResolveAbsolute(projDir6, recipeFile));
 
             var inputs = new List<string>();
-            var manifest = pf6.FindChildrenRecursive<Property>(p => p.Name == "AppxManifestXml")
-                .FirstOrDefault()?.Value;
+            var manifest = PropValue(pf6, "AppxManifestXml", null!);
             if (manifest != null)
             {
                 var mRel = graph.ToRelative(ResolveAbsolute(projDir6, manifest));
                 if (graph.Files.ContainsKey(mRel)) inputs.Add(mRel);
             }
-            var payload = pf6.FindChildrenRecursive<Parameter>(p => p.Name == "PayloadFiles")
-                .FirstOrDefault()?.Children.OfType<Item>().ToList() ?? [];
-            foreach (var item in payload)
+            var payloadParam = FirstChild<Parameter>(pf6.Children, p => p.Name == "PayloadFiles");
+            var payload = payloadParam != null ? ItemTexts(payloadParam.Children) : [];
+            foreach (var itemText in payload)
             {
-                var rel = graph.ToRelative(ResolveAbsolute(projDir6, item.Text));
+                var rel = graph.ToRelative(ResolveAbsolute(projDir6, itemText));
                 if (graph.Files.ContainsKey(rel)) inputs.Add(rel);
             }
 
@@ -664,12 +642,16 @@ static class BuildGraphFactory
         if (string.IsNullOrEmpty(batchedCmdLine)) return "";
         var parts = SplitCommandLine(batchedCmdLine);
         if (parts.Count <= sourceCount) return batchedCmdLine;
-        var flags = parts.Take(parts.Count - sourceCount).ToList();
+        var flagCount = parts.Count - sourceCount;
+        var flags = new List<string>(flagCount + 1);
+        for (int i = 0; i < flagCount; i++) flags.Add(parts[i]);
         // Inject /FS (force synchronous PDB writes) so parallel CL processes
         // sharing a PDB file don't race.  MSBuild batches N sources into one
         // cl.exe; bt splits them into parallel invocations that contend.
-        if (!flags.Any(f => f.Equals("/FS", StringComparison.OrdinalIgnoreCase)))
-            flags.Add("/FS");
+        bool hasFS = false;
+        foreach (var f in flags)
+            if (f.Equals("/FS", StringComparison.OrdinalIgnoreCase)) { hasFS = true; break; }
+        if (!hasFS) flags.Add("/FS");
         return string.Join(" ", flags) + $" /Fo\"{absObj}\" \"{absSource}\"";
     }
 
@@ -723,5 +705,50 @@ static class BuildGraphFactory
         }
 
         return string.Join(Path.DirectorySeparatorChar, parts[..commonLen]);
+    }
+
+    // --- Helpers to avoid System.Linq in binlog tree traversal ---
+
+    /// Find first child of a specific type matching a predicate.
+    static T? FirstChild<T>(IList<BaseNode> children, Func<T, bool>? predicate = null) where T : BaseNode
+    {
+        for (int i = 0; i < children.Count; i++)
+            if (children[i] is T t && (predicate == null || predicate(t)))
+                return t;
+        return null;
+    }
+
+    /// Find first child Folder with a given name.
+    static Folder? FindChildFolder(IList<BaseNode> children, string name)
+        => FirstChild<Folder>(children, f => f.Name == name);
+
+    /// Get the value of the first recursively-found Property with a given name, or fallback.
+    static string PropValue(TreeNode node, string name, string fallback = "")
+    {
+        foreach (var p in node.FindChildrenRecursive<Property>(p => p.Name == name))
+            return p.Value;
+        return fallback;
+    }
+
+    /// Collect Item children of the first Parameter with a given name, transformed.
+    static List<string> ParameterItems(TreeNode parent, string paramName, Func<string, string> transform)
+    {
+        var param = FirstChild<Parameter>(parent.Children, p => p.Name == paramName);
+        if (param == null) return [];
+        var result = new List<string>();
+        for (int i = 0; i < param.Children.Count; i++)
+            if (param.Children[i] is Item item)
+                result.Add(transform(item.Text));
+        return result;
+    }
+
+    /// Collect Item texts from children matching a type.
+    static List<string> ItemTexts(IList<BaseNode> children)
+    {
+        var result = new List<string>();
+        for (int i = 0; i < children.Count; i++)
+            if (children[i] is Item item)
+                result.Add(item.Text);
+        return result;
     }
 }

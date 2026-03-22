@@ -70,10 +70,19 @@ root.Add(cacheCmd);
 root.Add(watchCmd);
 
 // Custom coloured help — runs before System.CommandLine's default help
-var btVersion = System.Reflection.Assembly.GetExecutingAssembly()
-    .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
-    .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
-    ?? System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+var btVersion = "unknown";
+var attrs = System.Reflection.Assembly.GetExecutingAssembly()
+    .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false);
+foreach (var attr in attrs)
+{
+    if (attr is System.Reflection.AssemblyInformationalVersionAttribute infoAttr)
+    {
+        btVersion = infoAttr.InformationalVersion;
+        break;
+    }
+}
+if (btVersion == "unknown")
+    btVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
 // Short version for help banner:
 // Published: 1.0.0-ci.62.1c145d8+fullhash → strip +hash (already in suffix)
 // Dev build: 1.0.0+fullhash → trim hash to 7 chars
@@ -87,10 +96,10 @@ if (args.Length == 1 && args[0] is "--version")
     Console.WriteLine(btVersionShort);
     return 0;
 }
-if (args.Length == 0 || args.Any(a => a is "-?" or "-h" or "--help" or "help"))
+if (args.Length == 0 || Array.Exists(args, a => a is "-?" or "-h" or "--help" or "help"))
 {
     // Only colourize top-level help; let subcommand -? use defaults
-    if (args.Length == 0 || !args.Any(a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb" or "cache" or "watch"))
+    if (args.Length == 0 || !Array.Exists(args, a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb" or "cache" or "watch"))
     {
         Clr.SetMode("auto");
         Console.Error.WriteLine($"""

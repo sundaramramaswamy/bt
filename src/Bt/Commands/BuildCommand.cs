@@ -34,7 +34,10 @@ static class BuildCommand
         }
 
         // Filter to commands that have command lines (skip synthetic)
-        plan = plan.Where(c => !string.IsNullOrEmpty(c.CommandLine)).ToList();
+        var filtered = new List<CommandNode>(plan.Count);
+        foreach (var c in plan)
+            if (!string.IsNullOrEmpty(c.CommandLine)) filtered.Add(c);
+        plan = filtered;
         if (plan.Count == 0)
         {
             Console.Error.WriteLine($"{Clr.Yellow}No executable commands in plan.{Clr.Reset}");
@@ -60,7 +63,8 @@ static class BuildCommand
         // Execute in waves: commands whose inputs are all "done" can run in parallel.
         // Seed with files that are already available: source files (no producer)
         // plus outputs of commands NOT in the plan (already up-to-date).
-        var planIds = new HashSet<string>(plan.Select(c => c.Id), StringComparer.OrdinalIgnoreCase);
+        var planIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in plan) planIds.Add(c.Id);
         var produced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in g.Files.Values)
             if (!g.FileToProducer.TryGetValue(f.Path, out var pid) || !planIds.Contains(pid))
@@ -104,15 +108,24 @@ static class BuildCommand
 
         while (remaining.Count > 0)
         {
-            var wave = remaining.Where(c => c.Inputs.All(i => produced.Contains(i))).ToList();
+            var wave = new List<CommandNode>();
+            foreach (var c in remaining)
+            {
+                bool ready = true;
+                foreach (var i in c.Inputs)
+                    if (!produced.Contains(i)) { ready = false; break; }
+                if (ready) wave.Add(c);
+            }
             if (wave.Count == 0)
             {
                 if (isTty) Console.Error.WriteLine();
                 Console.Error.WriteLine($"{Clr.Red}Deadlock: {remaining.Count} commands stuck (missing inputs){Clr.Reset}");
                 foreach (var c in remaining)
                 {
-                    var missing = c.Inputs.Where(i => !produced.Contains(i)).ToList();
-                    Console.Error.WriteLine($"  [{c.Tool}] waiting on: {string.Join(", ", missing.Take(3))}");
+                    var missing = new List<string>();
+                    foreach (var i in c.Inputs)
+                        if (!produced.Contains(i)) { missing.Add(i); if (missing.Count >= 3) break; }
+                    Console.Error.WriteLine($"  [{c.Tool}] waiting on: {string.Join(", ", missing)}");
                 }
                 return 1;
             }
@@ -122,11 +135,11 @@ static class BuildCommand
             var results = new System.Collections.Concurrent.ConcurrentBag<(CommandNode cmd, int exitCode, string output)>();
             Parallel.ForEach(wave, new ParallelOptions { MaxDegreeOfParallelism = maxJobs }, cmd =>
             {
-                WriteStatus(cmd.Tool, cmd.Outputs.FirstOrDefault() ?? cmd.Id, done: false);
+                WriteStatus(cmd.Tool, cmd.Outputs.Count > 0 ? cmd.Outputs[0] : cmd.Id, done: false);
                 var (exitCode, output) = ExecuteCommand(cmd, envByProject.GetValueOrDefault(cmd.Project));
                 Interlocked.Increment(ref completed);
                 results.Add((cmd, exitCode, output));
-                WriteStatus(cmd.Tool, cmd.Outputs.FirstOrDefault() ?? cmd.Id, done: true, failed: exitCode != 0);
+                WriteStatus(cmd.Tool, cmd.Outputs.Count > 0 ? cmd.Outputs[0] : cmd.Id, done: true, failed: exitCode != 0);
             });
 
             foreach (var (cmd, exitCode, output) in results)
@@ -149,14 +162,17 @@ static class BuildCommand
                 {
                     failures++;
                     if (isTty) Console.Error.WriteLine();
-                    Console.Error.WriteLine($"  {Clr.Red}✗{Clr.Reset} [{cmd.Tool}] {cmd.Outputs.FirstOrDefault() ?? cmd.Id}  (exit {exitCode})");
+                    Console.Error.WriteLine($"  {Clr.Red}✗{Clr.Reset} [{cmd.Tool}] {(cmd.Outputs.Count > 0 ? cmd.Outputs[0] : cmd.Id)}  (exit {exitCode})");
                     if (!string.IsNullOrWhiteSpace(output))
                         Console.Error.WriteLine(output);
 
                     // Mark failed outputs as poisoned so downstream commands
                     // that depend on them are skipped rather than deadlocking.
                     var poison = new HashSet<string>(cmd.Outputs, StringComparer.OrdinalIgnoreCase);
-                    var skipped = remaining.Where(c => c.Inputs.Any(i => poison.Contains(i))).ToList();
+                    var skipped = new List<CommandNode>();
+                    foreach (var s in remaining)
+                        foreach (var i in s.Inputs)
+                            if (poison.Contains(i)) { skipped.Add(s); break; }
                     while (skipped.Count > 0)
                     {
                         foreach (var s in skipped)
@@ -165,7 +181,10 @@ static class BuildCommand
                             skippedCount++;
                             foreach (var o in s.Outputs) poison.Add(o);
                         }
-                        skipped = remaining.Where(c => c.Inputs.Any(i => poison.Contains(i))).ToList();
+                        skipped.Clear();
+                        foreach (var s in remaining)
+                            foreach (var i in s.Inputs)
+                                if (poison.Contains(i)) { skipped.Add(s); break; }
                     }
                 }
             }

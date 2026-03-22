@@ -14,10 +14,11 @@ static class FileResolver
         if (g.Files.ContainsKey(key)) return key;
 
         // Suffix match: user might type "main.cpp" to mean "XaBench\main.cpp"
-        var matches = g.Files.Keys
-            .Where(k => k.EndsWith(arg, StringComparison.OrdinalIgnoreCase)
-                      && (k.Length == arg.Length || k[k.Length - arg.Length - 1] is '\\' or '/'))
-            .ToList();
+        var matches = new List<string>();
+        foreach (var k in g.Files.Keys)
+            if (k.EndsWith(arg, StringComparison.OrdinalIgnoreCase)
+                && (k.Length == arg.Length || k[k.Length - arg.Length - 1] is '\\' or '/'))
+                matches.Add(k);
 
         if (matches.Count == 1) return matches[0];
         if (matches.Count > 1)

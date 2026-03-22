@@ -33,9 +33,58 @@ static class GraphCache
             foreach (var (k, v) in envMap) { stringSet.Add(k); stringSet.Add(v); }
         }
 
-        var strings = stringSet.ToArray();
+        var strings = new string[stringSet.Count];
+        stringSet.CopyTo(strings);
         var indexOf = new Dictionary<string, int>(strings.Length, StringComparer.Ordinal);
         for (int i = 0; i < strings.Length; i++) indexOf[strings[i]] = i;
+
+        var fbFiles = new List<FileFb>(graph.Files.Count);
+        foreach (var f in graph.Files.Values)
+            fbFiles.Add(new FileFb { StrIdx = indexOf[f.Path], Kind = (byte)f.Kind });
+
+        var fbCommands = new List<CommandFb>(graph.Commands.Count);
+        foreach (var c in graph.Commands.Values)
+        {
+            var inputIndices = new int[c.Inputs.Count];
+            for (int i = 0; i < c.Inputs.Count; i++) inputIndices[i] = indexOf[c.Inputs[i]];
+            var outputIndices = new int[c.Outputs.Count];
+            for (int i = 0; i < c.Outputs.Count; i++) outputIndices[i] = indexOf[c.Outputs[i]];
+            fbCommands.Add(new CommandFb
+            {
+                IdIdx = indexOf[c.Id],
+                ToolIdx = indexOf[c.Tool],
+                ProjectIdx = indexOf[c.Project],
+                TargetIdx = indexOf[c.Target],
+                InputIndices = inputIndices,
+                OutputIndices = outputIndices,
+                CmdlineIdx = indexOf[c.CommandLine],
+                WorkdirIdx = indexOf[c.WorkingDir],
+            });
+        }
+
+        var extPfxIndices = new int[graph.ExternalPrefixes.Count];
+        int extIdx = 0;
+        foreach (var p in graph.ExternalPrefixes) extPfxIndices[extIdx++] = indexOf[p];
+
+        var fbEnvs = new List<ProjectEnvFb>(graph.ProjectEnv.Count);
+        foreach (var (proj, envMap) in graph.ProjectEnv)
+        {
+            var nameIndices = new int[envMap.Count];
+            var valueIndices = new int[envMap.Count];
+            int ei = 0;
+            foreach (var (k, v) in envMap)
+            {
+                nameIndices[ei] = indexOf[k];
+                valueIndices[ei] = indexOf[v];
+                ei++;
+            }
+            fbEnvs.Add(new ProjectEnvFb
+            {
+                ProjectIdx = indexOf[proj],
+                VarNameIndices = nameIndices,
+                VarValueIndices = valueIndices,
+            });
+        }
 
         var fb = new GraphFb
         {
@@ -43,30 +92,10 @@ static class GraphCache
             BinlogTimestamp = binlogStamp.Ticks,
             RootDir = graph.RootDir,
             Strings = strings,
-            Files = graph.Files.Values.Select(f => new FileFb
-            {
-                StrIdx = indexOf[f.Path],
-                Kind = (byte)f.Kind
-            }).ToList(),
-            Commands = graph.Commands.Values.Select(c => new CommandFb
-            {
-                IdIdx = indexOf[c.Id],
-                ToolIdx = indexOf[c.Tool],
-                ProjectIdx = indexOf[c.Project],
-                TargetIdx = indexOf[c.Target],
-                InputIndices = c.Inputs.Select(i => indexOf[i]).ToArray(),
-                OutputIndices = c.Outputs.Select(o => indexOf[o]).ToArray(),
-                CmdlineIdx = indexOf[c.CommandLine],
-                WorkdirIdx = indexOf[c.WorkingDir],
-            }).ToList(),
-            ExternalPrefixIndices = graph.ExternalPrefixes
-                .Select(p => indexOf[p]).ToArray(),
-            ProjectEnvs = graph.ProjectEnv.Select(kv => new ProjectEnvFb
-            {
-                ProjectIdx = indexOf[kv.Key],
-                VarNameIndices = kv.Value.Keys.Select(k => indexOf[k]).ToArray(),
-                VarValueIndices = kv.Value.Values.Select(v => indexOf[v]).ToArray(),
-            }).ToList(),
+            Files = fbFiles,
+            Commands = fbCommands,
+            ExternalPrefixIndices = extPfxIndices,
+            ProjectEnvs = fbEnvs,
         };
 
         int maxSize = Serializer.GetMaxSize(fb);

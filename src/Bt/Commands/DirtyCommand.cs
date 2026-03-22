@@ -19,7 +19,9 @@ static class DirtyCommand
                 return 0;
             }
             Console.Error.WriteLine($"{Clr.Dim}Explicit files ({resolved.Count}):{Clr.Reset}");
-            foreach (var f in resolved.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            var sortedResolved = new List<string>(resolved);
+            sortedResolved.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in sortedResolved)
                 Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
             Console.Error.WriteLine();
             plan = g.GetAffectedCommands(resolved);
@@ -30,7 +32,9 @@ static class DirtyCommand
             Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
             var (mtimePlan, dirtySources) = g.GetDirtyCommandsByMtime();
             // Only show commands we can actually execute
-            plan = mtimePlan.Where(c => !string.IsNullOrEmpty(c.CommandLine)).ToList();
+            plan = new List<CommandNode>();
+            foreach (var c in mtimePlan)
+                if (!string.IsNullOrEmpty(c.CommandLine)) plan.Add(c);
 
             if (plan.Count == 0)
             {
@@ -39,13 +43,25 @@ static class DirtyCommand
             }
 
             // Print a tree per dirty source, filtered to only dirty commands.
-            var dirtyIds = new HashSet<string>(plan.Select(c => c.Id), StringComparer.OrdinalIgnoreCase);
+            var dirtyIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in plan) dirtyIds.Add(c.Id);
             foreach (var cmd in g.Commands.Values)
-                if (cmd.Tool.StartsWith("#") && cmd.Outputs.Any(o =>
-                    g.FileToConsumers.TryGetValue(o, out var cids) && cids.Any(dirtyIds.Contains)))
-                    dirtyIds.Add(cmd.Id);
+            {
+                if (!cmd.Tool.StartsWith("#")) continue;
+                bool match = false;
+                foreach (var o in cmd.Outputs)
+                {
+                    if (!g.FileToConsumers.TryGetValue(o, out var cids)) continue;
+                    foreach (var cid in cids)
+                        if (dirtyIds.Contains(cid)) { match = true; break; }
+                    if (match) break;
+                }
+                if (match) dirtyIds.Add(cmd.Id);
+            }
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (src, _) in dirtySources.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+            var sortedSources = new List<string>(dirtySources.Keys);
+            sortedSources.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (var src in sortedSources)
             {
                 Console.WriteLine($"{Clr.Red}{src}{Clr.Reset}");
                 GraphCommand.PrintTreeForward(g, src, "", true, seen, dirtyIds);

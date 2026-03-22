@@ -23,8 +23,13 @@ class BuildGraph
     public Dictionary<string, List<string>> SyntheticProducers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// Check if a file path is under an external include prefix.
-    public bool IsExternal(string relativePath) =>
-        ExternalPrefixes.Any(p => relativePath.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+    public bool IsExternal(string relativePath)
+    {
+        foreach (var p in ExternalPrefixes)
+            if (relativePath.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
 
     public void AddConsumer(string filePath, string cmdId)
     {
@@ -83,7 +88,8 @@ class BuildGraph
         var rest = path[root.Length..];
         foreach (var segment in rest.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
-            var match = Directory.EnumerateFileSystemEntries(result, segment).FirstOrDefault();
+            var enumerator = Directory.EnumerateFileSystemEntries(result, segment).GetEnumerator();
+            var match = enumerator.MoveNext() ? enumerator.Current : null;
             result = match ?? Path.Combine(result, segment);
         }
         return result;
@@ -257,7 +263,14 @@ class BuildGraph
             }
         }
 
-        var queue = new Queue<string>(inDegree.Where(kv => kv.Value == 0).Select(kv => kv.Key).OrderBy(k => k));
+        var queue = new Queue<string>();
+        foreach (var kv in inDegree)
+            if (kv.Value == 0) queue.Enqueue(kv.Key);
+        var sorted = new List<string>(queue);
+        sorted.Sort(StringComparer.OrdinalIgnoreCase);
+        queue.Clear();
+        foreach (var k in sorted) queue.Enqueue(k);
+
         var result = new List<CommandNode>();
         var seenOutputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (queue.Count > 0)
@@ -266,7 +279,9 @@ class BuildGraph
             if (Commands.TryGetValue(cmdId, out var cmd) && !cmd.Tool.StartsWith("#"))
                 result.Add(cmd);
             if (!dependents.TryGetValue(cmdId, out var deps)) continue;
-            foreach (var dep in deps.OrderBy(d => d))
+            var sortedDeps = new List<string>(deps);
+            sortedDeps.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (var dep in sortedDeps)
             {
                 inDegree[dep]--;
                 if (inDegree[dep] == 0) queue.Enqueue(dep);
@@ -278,7 +293,9 @@ class BuildGraph
         var deduped = new List<CommandNode>();
         foreach (var cmd in result)
         {
-            var outputKey = string.Join("|", cmd.Outputs.OrderBy(o => o, StringComparer.OrdinalIgnoreCase));
+            var sortedOutputs = new List<string>(cmd.Outputs);
+            sortedOutputs.Sort(StringComparer.OrdinalIgnoreCase);
+            var outputKey = string.Join("|", sortedOutputs);
             if (seenOutputs.Add(outputKey))
                 deduped.Add(cmd);
         }
@@ -293,7 +310,9 @@ class BuildGraph
     public (List<CommandNode> Plan, Dictionary<string, List<CommandNode>> DirtySources) GetDirtyCommandsByMtime()
     {
         // Topo-sort ALL real commands first (Kahn's algorithm)
-        var realCmds = Commands.Values.Where(c => !c.Tool.StartsWith("#")).ToList();
+        var realCmds = new List<CommandNode>();
+        foreach (var c in Commands.Values)
+            if (!c.Tool.StartsWith("#")) realCmds.Add(c);
         var inDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var dependents = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var cmd in realCmds)
@@ -301,7 +320,8 @@ class BuildGraph
             inDegree.TryAdd(cmd.Id, 0);
             dependents.TryAdd(cmd.Id, []);
         }
-        var cmdById = realCmds.ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
+        var cmdById = new Dictionary<string, CommandNode>(realCmds.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var c in realCmds) cmdById[c.Id] = c;
         foreach (var cmd in realCmds)
             foreach (var input in cmd.Inputs)
                 if (FileToProducer.TryGetValue(input, out var depId) && cmdById.ContainsKey(depId))
@@ -310,13 +330,20 @@ class BuildGraph
                     dependents[depId].Add(cmd.Id);
                 }
 
-        var queue = new Queue<string>(inDegree.Where(kv => kv.Value == 0).Select(kv => kv.Key).OrderBy(k => k));
+        var zeroQueue = new List<string>();
+        foreach (var kv in inDegree)
+            if (kv.Value == 0) zeroQueue.Add(kv.Key);
+        zeroQueue.Sort(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>(zeroQueue);
         var topoOrder = new List<CommandNode>();
         while (queue.Count > 0)
         {
             var id = queue.Dequeue();
             if (cmdById.TryGetValue(id, out var cmd)) topoOrder.Add(cmd);
-            foreach (var dep in dependents.GetValueOrDefault(id, []).OrderBy(d => d))
+            var depList = dependents.GetValueOrDefault(id, []);
+            var sortedDeps = new List<string>(depList);
+            sortedDeps.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (var dep in sortedDeps)
                 if (--inDegree[dep] == 0) queue.Enqueue(dep);
         }
 
@@ -351,7 +378,9 @@ class BuildGraph
 
         foreach (var cmd in topoOrder)
         {
-            var outputKey = string.Join("|", cmd.Outputs.OrderBy(o => o, StringComparer.OrdinalIgnoreCase));
+            var sortedOutputs = new List<string>(cmd.Outputs);
+            sortedOutputs.Sort(StringComparer.OrdinalIgnoreCase);
+            var outputKey = string.Join("|", sortedOutputs);
             if (!seenOutputs.Add(outputKey)) continue;
 
             bool dirty = false;
