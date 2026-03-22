@@ -7,9 +7,9 @@ static class FileKinds
     static readonly HashSet<string> HeaderExts = new(StringComparer.OrdinalIgnoreCase)
         { ".h", ".hpp", ".hxx" };
     static readonly HashSet<string> OutputExts = new(StringComparer.OrdinalIgnoreCase)
-        { ".exe", ".dll", ".lib", ".winmd", ".xbf", ".obj", ".pri", ".appxrecipe" };
+        { ".exe", ".dll", ".lib", ".winmd", ".xbf", ".obj", ".pri", ".appxrecipe", ".pch" };
     static readonly HashSet<string> IntermediateExts = new(StringComparer.OrdinalIgnoreCase)
-        { ".pch", ".res" };
+        { ".res" };
 
     public static FileKind Classify(string path)
     {

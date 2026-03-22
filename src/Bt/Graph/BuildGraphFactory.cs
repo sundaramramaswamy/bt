@@ -130,7 +130,7 @@ static class BuildGraphFactory
                     graph.Files.TryAdd(src, new FileNode(src, FileKinds.Classify(src)));
                     graph.Files.TryAdd(obj, new FileNode(obj, FileKinds.Classify(obj)));
                     if (!string.IsNullOrEmpty(pchPath))
-                        graph.Files.TryAdd(pchPath, new FileNode(pchPath, FileKind.Intermediate));
+                        graph.Files.TryAdd(pchPath, new FileNode(pchPath, FileKinds.Classify(pchPath)));
                     foreach (var i in inputs) graph.AddConsumer(i, cmdId);
                     foreach (var o in outputs) graph.FileToProducer.TryAdd(o, cmdId);
 
