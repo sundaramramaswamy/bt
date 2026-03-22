@@ -16,6 +16,24 @@ static class WatchCommand
         Console.Error.WriteLine($"{Clr.Dim}Press Ctrl+C to stop.{Clr.Reset}");
         Console.Error.WriteLine();
 
+        // Initial dirty check: build anything already out-of-date before
+        // entering the watch loop (FileSystemWatcher only sees new changes).
+        {
+            var rc = BuildCommand.RunBuild(graph, [], maxJobs, dryRun: false);
+            if (rc == BuildCommand.BuildResult.Succeeded && !string.IsNullOrEmpty(runCmd))
+            {
+                Console.Error.WriteLine();
+                Console.Error.WriteLine($"{Clr.Cyan}▶ {runCmd}{Clr.Reset}");
+                var exitCode = RunPassthrough(runCmd, graph.RootDir);
+                if (exitCode != 0)
+                    Console.Error.WriteLine($"{Clr.Red}Exit {exitCode}{Clr.Reset}");
+            }
+            else if (rc == BuildCommand.BuildResult.Failed)
+            {
+                Console.Error.WriteLine($"{Clr.Red}Initial build failed{Clr.Reset}");
+            }
+        }
+
         // State
         var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pendingLock = new object();
@@ -88,7 +106,7 @@ static class WatchCommand
 
             var rc = BuildCommand.RunBuild(graph, resolved.ToArray(), maxJobs, dryRun: false);
 
-            if (rc == 0 && !string.IsNullOrEmpty(runCmd))
+            if (rc == BuildCommand.BuildResult.Succeeded && !string.IsNullOrEmpty(runCmd))
             {
                 Console.Error.WriteLine();
                 Console.Error.WriteLine($"{Clr.Cyan}▶ {runCmd}{Clr.Reset}");

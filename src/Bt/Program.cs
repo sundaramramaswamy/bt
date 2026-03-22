@@ -179,7 +179,7 @@ buildCmd.SetAction(result =>
     var explicitFiles = result.GetValue(buildFilesArg) ?? [];
     var maxJobs = result.GetValue(buildJobsOption);
     var dryRun = result.GetValue(buildDryRunOption);
-    return BuildCommand.RunBuild(g, explicitFiles, maxJobs, dryRun);
+    return BuildCommand.RunBuild(g, explicitFiles, maxJobs, dryRun) == BuildCommand.BuildResult.Failed ? 1 : 0;
 });
 
 compileCommandsCmd.SetAction(result =>

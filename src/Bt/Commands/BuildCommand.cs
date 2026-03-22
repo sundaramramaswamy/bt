@@ -1,6 +1,8 @@
 static class BuildCommand
 {
-    public static int RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryRun)
+    public enum BuildResult { UpToDate, Succeeded, Failed }
+
+    public static BuildResult RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryRun)
     {
         List<CommandNode> plan;
 
@@ -16,7 +18,7 @@ static class BuildCommand
             if (resolved.Count == 0)
             {
                 Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
-                return 0;
+                return BuildResult.UpToDate;
             }
             plan = g.GetAffectedCommands(resolved);
         }
@@ -30,7 +32,7 @@ static class BuildCommand
         if (plan.Count == 0)
         {
             Console.Error.WriteLine($"{Clr.Green}Everything up to date.{Clr.Reset}");
-            return 0;
+            return BuildResult.UpToDate;
         }
 
         // Filter to commands that have command lines (skip synthetic)
@@ -41,7 +43,7 @@ static class BuildCommand
         if (plan.Count == 0)
         {
             Console.Error.WriteLine($"{Clr.Yellow}No executable commands in plan.{Clr.Reset}");
-            return 0;
+            return BuildResult.UpToDate;
         }
 
         Console.Error.WriteLine($"{Clr.Bold}Build plan: {plan.Count} command{(plan.Count == 1 ? "" : "s")}{Clr.Reset}");
@@ -57,7 +59,7 @@ static class BuildCommand
                 Console.WriteLine(cmd.CommandLine);
                 Console.Error.WriteLine();
             }
-            return 0;
+            return BuildResult.Succeeded;  // dry-run always "succeeds"
         }
 
         // Execute in waves: commands whose inputs are all "done" can run in parallel.
@@ -127,7 +129,7 @@ static class BuildCommand
                         if (!produced.Contains(i)) { missing.Add(i); if (missing.Count >= 3) break; }
                     Console.Error.WriteLine($"  [{c.Tool}] waiting on: {string.Join(", ", missing)}");
                 }
-                return 1;
+                return BuildResult.Failed;
             }
 
             foreach (var c in wave) remaining.Remove(c);
@@ -203,7 +205,7 @@ static class BuildCommand
             var skippedMsg = skippedCount > 0 ? $", {skippedCount} skipped" : "";
             Console.Error.WriteLine($"{Clr.Red}Build failed{Clr.Reset} ({failures} failed{skippedMsg}, {plan.Count} total, {sw.Elapsed.TotalSeconds:F1}s)");
         }
-        return failures > 0 ? 1 : 0;
+        return failures > 0 ? BuildResult.Failed : BuildResult.Succeeded;
     }
 
     public static (int exitCode, string output) ExecuteCommand(CommandNode cmd, Dictionary<string, string>? env = null)
