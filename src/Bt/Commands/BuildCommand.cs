@@ -2,7 +2,7 @@ static class BuildCommand
 {
     public enum BuildResult { UpToDate, Succeeded, Failed }
 
-    public static BuildResult RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryRun)
+    public static BuildResult RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryRun, bool compileOnly = false)
     {
         List<CommandNode> plan;
 
@@ -20,13 +20,22 @@ static class BuildCommand
                 Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
                 return BuildResult.UpToDate;
             }
-            plan = g.GetAffectedCommands(resolved);
+            plan = compileOnly
+                ? g.GetCompileCommandsFor(resolved)
+                : g.GetAffectedCommands(resolved);
         }
         else
         {
             // Default: mtime-based dirty detection
             Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
             plan = g.GetDirtyCommandsByMtime().Plan;
+            if (compileOnly)
+            {
+                var compileOnly_ = new List<CommandNode>(plan.Count);
+                foreach (var c in plan)
+                    if (BuildGraph.IsCompileTool(c.Tool)) compileOnly_.Add(c);
+                plan = compileOnly_;
+            }
         }
 
         if (plan.Count == 0)

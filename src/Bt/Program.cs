@@ -38,10 +38,13 @@ var buildJobsOption = new Option<int>("-j") { Description = "Max parallel jobs (
 buildJobsOption.DefaultValueFactory = _ => Environment.ProcessorCount;
 var buildDryRunOption = new Option<bool>("--dry-run") { Description = "Print commands without executing" };
 buildDryRunOption.Aliases.Add("-n");
+var buildCompileOnlyOption = new Option<bool>("--compile-only") { Description = "Compile only — skip link/lib" };
+buildCompileOnlyOption.Aliases.Add("-c");
 var buildCmd = new Command("build", "Build only what's dirty");
 buildCmd.Add(buildFilesArg);
 buildCmd.Add(buildJobsOption);
 buildCmd.Add(buildDryRunOption);
+buildCmd.Add(buildCompileOnlyOption);
 
 var compileCommandsOutputOption = new Option<string>("-o") { Description = "Output file (default: compile_commands.json in repo root)" };
 var compileCommandsCmd = new Command("compiledb", "Generate compile_commands.json for clangd/clang-tidy");
@@ -113,7 +116,7 @@ if (args.Length == 0 || Array.Exists(args, a => a is "-?" or "-h" or "--help" or
           {Clr.Cyan}bins{Clr.Reset} <files>       Downstream dependency tree
           {Clr.Cyan}srcs{Clr.Reset} <files>       Upstream dependency tree
           {Clr.Cyan}dirty{Clr.Reset} [files]      Build plan (mtime-based, or explicit files)
-          {Clr.Cyan}build{Clr.Reset} [files]      Build only what's dirty (-j N, --dry-run)
+          {Clr.Cyan}build{Clr.Reset} [files]      Build only what's dirty (-j N, -n, -c)
           {Clr.Cyan}compiledb{Clr.Reset}          Generate compile_commands.json (-o path)
           {Clr.Cyan}cache{Clr.Reset}              Parse binlog and cache dependency graph
           {Clr.Cyan}watch{Clr.Reset}              Watch sources and rebuild on change
@@ -123,6 +126,11 @@ if (args.Length == 0 || Array.Exists(args, a => a is "-?" or "-h" or "--help" or
           {Clr.Green}--color{Clr.Reset}  <mode>    auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
           {Clr.Green}--version{Clr.Reset}          Show version
           {Clr.Green}-?, --help{Clr.Reset}         Show this help
+
+        {Clr.Yellow}Build options:{Clr.Reset}
+          {Clr.Green}-j{Clr.Reset} <N>              Max parallel jobs     {Clr.Dim}[default: CPU cores]{Clr.Reset}
+          {Clr.Green}-n, --dry-run{Clr.Reset}       Print commands without executing
+          {Clr.Green}-c, --compile-only{Clr.Reset}  Compile only — skip link/lib
 
         {Clr.Yellow}Graph filters:{Clr.Reset}
           {Clr.Green}-f, --file{Clr.Reset} <path>     Subgraph reachable from/to file
@@ -138,6 +146,7 @@ if (args.Length == 0 || Array.Exists(args, a => a is "-?" or "-h" or "--help" or
           {Clr.Dim}bt build{Clr.Reset}
           {Clr.Dim}bt build -j 4 src/Foo.cpp{Clr.Reset}
           {Clr.Dim}bt build --dry-run{Clr.Reset}
+          {Clr.Dim}bt build -c src/Foo.cpp{Clr.Reset}
           {Clr.Dim}bt compiledb{Clr.Reset}
         """);
         return 0;
@@ -179,7 +188,8 @@ buildCmd.SetAction(result =>
     var explicitFiles = result.GetValue(buildFilesArg) ?? [];
     var maxJobs = result.GetValue(buildJobsOption);
     var dryRun = result.GetValue(buildDryRunOption);
-    return BuildCommand.RunBuild(g, explicitFiles, maxJobs, dryRun) == BuildCommand.BuildResult.Failed ? 1 : 0;
+    var compileOnly = result.GetValue(buildCompileOnlyOption);
+    return BuildCommand.RunBuild(g, explicitFiles, maxJobs, dryRun, compileOnly) == BuildCommand.BuildResult.Failed ? 1 : 0;
 });
 
 compileCommandsCmd.SetAction(result =>

@@ -458,4 +458,56 @@ class BuildGraph
                     CollectSyntheticSources(input, collected);
         }
     }
+
+    /// First-level compile tools: source → intermediate (no aggregation/packaging).
+    public static bool IsCompileTool(string tool)
+        => tool is "CL" or "MIDL" or "CompileXaml";
+
+    /// Find compile commands for a set of files.
+    /// For source files consumed by compile commands, returns those directly.
+    /// For headers, walks through synthetic #include edges to find compile commands.
+    public List<CommandNode> GetCompileCommandsFor(ISet<string> files)
+    {
+        var result = new List<CommandNode>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in files)
+        {
+            if (!FileToConsumers.TryGetValue(file, out var consumerIds)) continue;
+            foreach (var cmdId in consumerIds)
+            {
+                if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+                if (IsCompileTool(cmd.Tool))
+                {
+                    if (seen.Add(cmd.Id)) result.Add(cmd);
+                }
+                else if (cmd.Tool.StartsWith('#'))
+                {
+                    // Synthetic (#include) — walk through to compile commands
+                    foreach (var output in cmd.Outputs)
+                        CollectCompileConsumers(output, seen, result);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    void CollectCompileConsumers(string file, HashSet<string> seen, List<CommandNode> result)
+    {
+        if (!FileToConsumers.TryGetValue(file, out var consumerIds)) return;
+        foreach (var cmdId in consumerIds)
+        {
+            if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+            if (IsCompileTool(cmd.Tool))
+            {
+                if (seen.Add(cmd.Id)) result.Add(cmd);
+            }
+            else if (cmd.Tool.StartsWith('#'))
+            {
+                foreach (var output in cmd.Outputs)
+                    CollectCompileConsumers(output, seen, result);
+            }
+        }
+    }
 }
