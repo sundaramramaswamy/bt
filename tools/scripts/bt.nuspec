@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package>
+  <metadata>
+    <id>Bt</id>
+    <version>$version$</version>
+    <description>bt — MSBuild incremental build tool (NativeAOT)</description>
+    <authors>SuRamaswamy</authors>
+  </metadata>
+  <files>
+    <file src="staging\win-x64\bt.exe"   target="tools\win-x64\"   />
+    <file src="staging\win-arm64\bt.exe" target="tools\win-arm64\" />
+  </files>
+</package>

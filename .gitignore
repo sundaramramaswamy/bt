@@ -1,5 +1,6 @@
 *.binlog
 .bt/
 tmp/
+staging/
 copilot-session-*.md
 feed.config
