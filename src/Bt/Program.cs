@@ -101,10 +101,146 @@ if (args.Length == 1 && args[0] is "--version")
 }
 if (args.Length == 0 || Array.Exists(args, a => a is "-?" or "-h" or "--help" or "help"))
 {
-    // Only colourize top-level help; let subcommand -? use defaults
-    if (args.Length == 0 || !Array.Exists(args, a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb" or "cache" or "watch"))
-    {
-        Clr.SetMode("auto");
+    Clr.SetMode("auto");
+    var sub = Array.Find(args, a => a is "graph" or "bins" or "srcs" or "dirty" or "build" or "compiledb" or "cache" or "watch");
+    if (sub is "graph")
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt graph{Clr.Reset} — Emit Graphviz DOT dependency graph
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt graph [options]
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}-f, --file{Clr.Reset} <path>     Subgraph reachable from/to file
+          {Clr.Green}-p, --project{Clr.Reset} <name>  Only nodes from project
+          {Clr.Green}--binlog{Clr.Reset} <path>       Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>       auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Examples:{Clr.Reset}
+          {Clr.Dim}bt graph | dot -Tsvg -o build.svg{Clr.Reset}
+          {Clr.Dim}bt graph -f TestDataItem.h{Clr.Reset}
+          {Clr.Dim}bt graph -p XaBench -f main.cpp{Clr.Reset}
+        """);
+    else if (sub is "bins")
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt bins{Clr.Reset} — Downstream dependency tree from <file>
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt bins <files>
+
+        {Clr.Yellow}Arguments:{Clr.Reset}
+          {Clr.Cyan}<files>{Clr.Reset}  Source files to query
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Example:{Clr.Reset}
+          {Clr.Dim}bt bins TestDataItem.h{Clr.Reset}
+        """);
+    else if (sub is "srcs")
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt srcs{Clr.Reset} — Upstream dependency tree for <file>
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt srcs <files>
+
+        {Clr.Yellow}Arguments:{Clr.Reset}
+          {Clr.Cyan}<files>{Clr.Reset}  Output files to query
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Example:{Clr.Reset}
+          {Clr.Dim}bt srcs XaBench.exe{Clr.Reset}
+        """);
+    else if (sub is "dirty")
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt dirty{Clr.Reset} — Build plan for changed files
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt dirty [files]
+
+        {Clr.Yellow}Arguments:{Clr.Reset}
+          {Clr.Cyan}[files]{Clr.Reset}  Changed files {Clr.Dim}(default: all mtime-dirty){Clr.Reset}
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Examples:{Clr.Reset}
+          {Clr.Dim}bt dirty{Clr.Reset}
+          {Clr.Dim}bt dirty src/Foo.cpp src/Bar.h{Clr.Reset}
+        """);
+    else if (sub is "build")
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt build{Clr.Reset} — Build only what's dirty
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt build [files] [options]
+
+        {Clr.Yellow}Arguments:{Clr.Reset}
+          {Clr.Cyan}[files]{Clr.Reset}  Files to build {Clr.Dim}(default: all mtime-dirty){Clr.Reset}
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}-j{Clr.Reset} <N>              Max parallel jobs     {Clr.Dim}[default: CPU cores]{Clr.Reset}
+          {Clr.Green}-n, --dry-run{Clr.Reset}       Print commands without executing
+          {Clr.Green}-c, --compile-only{Clr.Reset}  Compile only — skip link/lib
+          {Clr.Green}--binlog{Clr.Reset} <path>     Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>     auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Examples:{Clr.Reset}
+          {Clr.Dim}bt build{Clr.Reset}
+          {Clr.Dim}bt build -j 4 src/Foo.cpp{Clr.Reset}
+          {Clr.Dim}bt build --dry-run{Clr.Reset}
+          {Clr.Dim}bt build -c src/Foo.cpp{Clr.Reset}
+        """);
+    else if (sub is "compiledb")
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt compiledb{Clr.Reset} — Generate compile_commands.json for clangd/clang-tidy
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt compiledb [options]
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}-o{Clr.Reset} <path>        Output file  {Clr.Dim}[default: compile_commands.json]{Clr.Reset}
+          {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Example:{Clr.Reset}
+          {Clr.Dim}bt compiledb{Clr.Reset}
+        """);
+    else if (sub is "cache")
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt cache{Clr.Reset} — Parse binlog and cache dependency graph
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt cache [options]
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+        """);
+    else if (sub is "watch")
+        Console.Error.WriteLine($"""
+
+        {Clr.Bold}bt watch{Clr.Reset} — Watch sources and rebuild on change
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt watch [options]
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}--debounce{Clr.Reset} <ms>  Debounce delay before rebuild  {Clr.Dim}[default: 300]{Clr.Reset}
+          {Clr.Green}--run{Clr.Reset} <cmd>      Command to run after successful build
+          {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
+          {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Examples:{Clr.Reset}
+          {Clr.Dim}bt watch{Clr.Reset}
+          {Clr.Dim}bt watch --run "test.exe"{Clr.Reset}
+          {Clr.Dim}bt watch --debounce 500{Clr.Reset}
+        """);
+    else
         Console.Error.WriteLine($"""
 
         {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{btVersionShort}{Clr.Reset} — MSBuild incremental build tool
@@ -149,8 +285,7 @@ if (args.Length == 0 || Array.Exists(args, a => a is "-?" or "-h" or "--help" or
           {Clr.Dim}bt build -c src/Foo.cpp{Clr.Reset}
           {Clr.Dim}bt compiledb{Clr.Reset}
         """);
-        return 0;
-    }
+    return 0;
 }
 
 graphCmd.SetAction(result =>
