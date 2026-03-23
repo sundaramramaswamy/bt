@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [e3797be]
+
+### Added
+- `build -c` / `--compile-only` — run only first-level compile
+  commands (CL, MIDL, CompileXaml), skipping link/lib/packaging.
+  Works with explicit files (`bt build -c foo.cpp`) or mtime-dirty
+  mode (`bt build -c`).  Useful for fast syntax-check workflows and
+  MCP tools.
+
 ## [459dfd1]
 
 ### Fixed

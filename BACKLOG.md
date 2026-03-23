@@ -17,7 +17,8 @@
       correct approach.
 
 ## Features
-- [x] Live progress display for `build` (ninja/FASTBuild-style line refresh)
+- [ ] `build --profile` — report per-command wall-clock time to identify build
+      bottlenecks
 
 ## Robustness
 - [x] ~~Version-stamp the cache~~ — cache version field (int) auto-invalidates

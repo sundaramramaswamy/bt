@@ -31,6 +31,7 @@ bt srcs MyApp.exe             # tree of everything upstream
 bt dirty                      # build plan from file timestamps (mtime)
 bt dirty MyFile.cpp           # build plan for specific file(s)
 bt build                      # rebuild only what's stale
+bt build -c MyFile.cpp        # compile only — skip link/lib
 bt build -n                   # dry-run — show commands without executing
 bt watch                      # watch sources, rebuild on save
 bt compiledb                  # generate compile_commands.json for clangd
@@ -70,6 +71,7 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 | `--color <mode>` | `auto` | ANSI colours: `auto`, `always`, `never` |
 | `-j <N>` | CPU cores | Max parallel commands for `build` |
 | `-n, --dry-run` | — | Print commands without executing (`build` only) |
+| `-c, --compile-only` | — | Compile only — skip link/lib (`build` only) |
 | `--debounce <ms>` | `300` | Debounce delay before rebuilding (`watch` only) |
 | `--run <cmd>` | — | Run a command after each successful rebuild (`watch` only) |
 | `-o <path>` | `compile_commands.json` | Output file for `compiledb` |
