@@ -29,8 +29,9 @@ try {
     $feedUrl  = $config.Url
 
     # Ensure feed is registered
-    $sources = dotnet nuget list source
-    if ($sources -notmatch [regex]::Escape($feedUrl) -and $sources -notmatch [regex]::Escape($feedName)) {
+    $sources = dotnet nuget list source 2>&1 | Out-String
+    $namePattern = "\b$([regex]::Escape($feedName))\b"
+    if ($sources -notmatch [regex]::Escape($feedUrl) -and $sources -notmatch $namePattern) {
         Write-Host "Adding NuGet source '$feedName' ..." -ForegroundColor Yellow
         dotnet nuget add source $feedUrl --name $feedName
     }
@@ -73,7 +74,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed" }
 
     Write-Host "`nPublished Bt $version ($($RID -join ', '))" -ForegroundColor Green
-    Write-Host "Install:  nuget install Bt -Version $version -Source $feedName -OutputDirectory ~\tools" -ForegroundColor Dim
+    Write-Host "Install:  nuget install Bt -Version $version -Source $feedName -OutputDirectory ~\tools" -ForegroundColor DarkGray
 }
 finally {
     Pop-Location
