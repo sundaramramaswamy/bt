@@ -119,6 +119,30 @@ dotnet publish src/Bt -c Release -r win-arm64   # or win-x64, linux-x64
 # Output: src/Bt/bin/Release/net8.0/<rid>/publish/bt.exe (~14 MB)
 ```
 
+## Installing
+
+### From NuGet feed (pre-built)
+
+``` powershell
+# One-time: install bt.exe to ~/tools (already on PATH)
+nuget install Bt -Source <feed> -OutputDirectory $env:TEMP\bt-pkg -ExcludeVersion
+Copy-Item $env:TEMP\bt-pkg\Bt\tools\win-$env:PROCESSOR_ARCHITECTURE\bt.exe ~\tools\
+Remove-Item $env:TEMP\bt-pkg -Recurse
+```
+
+### Publishing to a feed
+
+``` powershell
+# From repo root — builds win-x64 + win-arm64, packs, pushes
+tools\scripts\publish.ps1
+
+# Single RID only
+tools\scripts\publish.ps1 -RID win-arm64
+```
+
+On first run, `publish.ps1` prompts for feed name and URL, saved to
+`tools/scripts/feed.config` (gitignored).
+
 ## Caveats
 
 - **CreateWinMD is skipped.** C++/WinRT projects run `link.exe /WINMD:ONLY`
