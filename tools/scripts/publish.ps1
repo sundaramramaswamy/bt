@@ -53,21 +53,16 @@ try {
         Write-Host "  $out\bt.exe" -ForegroundColor Green
     }
 
-    # --- Pack nupkg (a nupkg is a zip with a .nuspec at the root) ---
-    $nuspecTemplate = Join-Path $root 'tools\scripts\bt.nuspec'
-    $nuspecContent = (Get-Content $nuspecTemplate -Raw) -replace '\$version\$', $version
-    $pkgDir = Join-Path $staging '_pkg'
-    New-Item $pkgDir -ItemType Directory -Force | Out-Null
-    $nuspecContent | Set-Content (Join-Path $pkgDir 'Bt.nuspec')
-
-    foreach ($rid in $RID) {
-        $dest = Join-Path $pkgDir "tools\$rid"
-        New-Item $dest -ItemType Directory -Force | Out-Null
-        Copy-Item (Join-Path $staging "$rid\bt.exe") $dest
-    }
-
+    # --- Pack nupkg via dotnet pack with custom nuspec ---
+    Write-Host "Packing Bt $version ..." -ForegroundColor Cyan
+    $nuspecPath = Join-Path $root 'tools\scripts\bt.nuspec'
+    dotnet pack src\Bt\Bt.csproj --no-build --no-restore `
+        /p:NuspecFile="$nuspecPath" `
+        /p:NuspecBasePath="$root" `
+        /p:NuspecProperties="version=$version" `
+        -o $staging
+    if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed" }
     $pkg = Join-Path $staging "Bt.$version.nupkg"
-    Compress-Archive -Path "$pkgDir\*" -DestinationPath $pkg -Force
 
     Write-Host "Pushing $pkg ..." -ForegroundColor Cyan
     dotnet nuget push $pkg --source $feedName --api-key az

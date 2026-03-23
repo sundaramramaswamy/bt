@@ -4,7 +4,7 @@
     <id>Bt</id>
     <version>$version$</version>
     <description>bt — MSBuild incremental build tool (NativeAOT)</description>
-    <authors>SuRamaswamy</authors>
+    <authors>Sundaram Ramaswamy</authors>
   </metadata>
   <files>
     <file src="staging\win-x64\bt.exe"   target="tools\win-x64\"   />
