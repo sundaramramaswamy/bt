@@ -385,6 +385,7 @@ static BuildGraph LoadGraph(string binlogPath)
     var binlogStamp = File.GetLastWriteTimeUtc(binlogPath);
 
     // Try loading from cache
+    BuildGraph graph;
     if (File.Exists(cachePath))
     {
         try
@@ -393,7 +394,8 @@ static BuildGraph LoadGraph(string binlogPath)
             if (cached is { } c && c.BinlogTimestamp == binlogStamp.Ticks)
             {
                 Console.Error.WriteLine($"{Clr.Dim}cache:{Clr.Reset} {cachePath}");
-                return c.Graph;
+                graph = c.Graph;
+                goto infer;
             }
             Console.Error.WriteLine($"{Clr.Dim}cache stale, rebuilding{Clr.Reset}");
         }
@@ -402,8 +404,10 @@ static BuildGraph LoadGraph(string binlogPath)
 
     // Parse binlog and build graph
     Console.Error.WriteLine($"{Clr.Dim}binlog:{Clr.Reset} {binlogPath}");
-    var build = BinaryLog.ReadBuild(binlogPath);
-    var graph = BuildGraphFactory.FromBinlog(build);
+    {
+        var build = BinaryLog.ReadBuild(binlogPath);
+        graph = BuildGraphFactory.FromBinlog(build);
+    }
 
     // Save cache
     try
@@ -413,6 +417,14 @@ static BuildGraph LoadGraph(string binlogPath)
         Console.Error.WriteLine($"{Clr.Dim}cached:{Clr.Reset} {cachePath}");
     }
     catch (Exception ex) { Console.Error.WriteLine($"{Clr.Dim}cache write failed: {ex.Message}{Clr.Reset}"); }
+
+    infer:
+    var inf = SourceInference.InferNewSources(graph, binlogPath);
+    if (inf.InferredCount > 0)
+        Console.Error.WriteLine(
+            $"{Clr.Yellow}inferred:{Clr.Reset} {inf.InferredCount} new source(s) not in binlog");
+    foreach (var w in inf.Warnings)
+        Console.Error.WriteLine($"{Clr.Yellow}warning:{Clr.Reset} {w}");
 
     return graph;
 }
