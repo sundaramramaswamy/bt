@@ -656,7 +656,7 @@ static class BuildGraphFactory
     }
 
     /// Crude command-line splitter that respects double quotes.
-    static List<string> SplitCommandLine(string cmdLine)
+    internal static List<string> SplitCommandLine(string cmdLine)
     {
         var result = new List<string>();
         var sb = new System.Text.StringBuilder();
