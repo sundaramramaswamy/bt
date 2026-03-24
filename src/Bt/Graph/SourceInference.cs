@@ -46,7 +46,7 @@ static class SourceInference
             try { doc = XDocument.Load(vcxprojPath); }
             catch { continue; }
 
-            foreach (var item in CollectClCompileItems(doc, workingDir))
+            foreach (var item in CollectClCompileItems(doc, workingDir, graph.RootDir))
             {
                 var (include, hasMetadata) = item;
 
@@ -132,17 +132,63 @@ static class SourceInference
     }
 
     /// Yields (Include attribute value, hasChildElements) for every <ClCompile> item
-    /// found anywhere in the document.
+    /// in the document, and also follows <Import> links to .vcxitems shared-item files.
+    /// Items from .vcxitems are yielded with their Include pre-resolved to an absolute
+    /// path (so the caller's workingDir-relative resolution stays correct).
     static IEnumerable<(string Include, bool HasMetadata)> CollectClCompileItems(
-        XDocument doc, string _workingDir)
+        XDocument doc, string workingDir, string rootDir)
     {
         var ns = doc.Root?.Name.Namespace ?? XNamespace.None;
+
+        // Direct items in this file.
         foreach (var el in doc.Descendants(ns + "ClCompile"))
         {
             var inc = el.Attribute("Include")?.Value;
             if (!string.IsNullOrEmpty(inc))
                 yield return (inc, el.HasElements);
         }
+
+        // Follow imports to .vcxitems (Shared Items Projects).
+        // These are plain item-list XML files that need no MSBuild property evaluation.
+        foreach (var import in doc.Descendants(ns + "Import"))
+        {
+            var projAttr = import.Attribute("Project")?.Value ?? "";
+            if (!projAttr.EndsWith(".vcxitems", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var vcxitemsPath = Path.GetFullPath(
+                Path.Combine(workingDir, ExpandSimpleMacros(projAttr, workingDir, rootDir)));
+            if (!File.Exists(vcxitemsPath)) continue;
+
+            var vcxiDir = Path.GetDirectoryName(vcxitemsPath) ?? workingDir;
+
+            XDocument vcxi;
+            try { vcxi = XDocument.Load(vcxitemsPath); }
+            catch { continue; }
+
+            var vcxiNs = vcxi.Root?.Name.Namespace ?? XNamespace.None;
+            foreach (var el in vcxi.Descendants(vcxiNs + "ClCompile"))
+            {
+                var inc = el.Attribute("Include")?.Value;
+                if (string.IsNullOrEmpty(inc)) continue;
+                // Pre-resolve so caller's Path.Combine(workingDir, inc) is correct
+                // regardless of where the .vcxitems lives relative to the .vcxproj.
+                var absInc = Path.GetFullPath(
+                    Path.Combine(vcxiDir, ExpandSimpleMacros(inc, vcxiDir, rootDir)));
+                yield return (absInc, el.HasElements);
+            }
+        }
+    }
+
+    /// Expands the subset of MSBuild macros we can resolve without running MSBuild.
+    static string ExpandSimpleMacros(string value, string projectDir, string rootDir)
+    {
+        // Append separator so $(ProjectDir)foo resolves to <dir>\foo correctly.
+        var pd = projectDir.TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+        var sd = rootDir.TrimEnd('\\', '/')    + Path.DirectorySeparatorChar;
+        return value
+            .Replace("$(ProjectDir)",             pd, StringComparison.OrdinalIgnoreCase)
+            .Replace("$(MSBuildThisFileDirectory)", pd, StringComparison.OrdinalIgnoreCase)
+            .Replace("$(SolutionDir)",             sd, StringComparison.OrdinalIgnoreCase);
     }
 
     /// Derives a per-file command line for a new source from a peer's existing
