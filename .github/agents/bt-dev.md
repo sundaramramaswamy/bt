@@ -1,6 +1,6 @@
 ---
 name: bt-dev
-description: Expert in bt's MSBuild binlog graph engine
+description: Expert in bt's MSBuild binlog graph engine. Use for tasks involving graph construction, cache, tlog enrichment, build execution, NativeAOT, FlatBuffers schema, or any bt source code changes.
 tools:
   - Read
   - Edit
@@ -25,12 +25,14 @@ Execution speed of `bt` is of the essence, without sacrificing correctness for t
 - **Cache**: FlatBuffers (FlatSharp) with sorted string table + integer indices.  Version-stamped (`CacheVersion` in `GraphCache.cs`); bump when graph structure changes.
 - **Tlog enrichment**: `WireTlogHeaders()` reads `CL.read.1.tlog` from intermediate obj dirs to wire precise `#include` edges.  Falls back to conservative `ClInclude` when tlogs are missing.
 - **Build execution**: `BuildCommand` replays `cl.exe`/`link.exe` directly with per-project environment from binlog's `SetEnv` tasks.  Parallel wave execution.
+- **Source inference**: `SourceInference.InferNewSources()` runs after every graph load.  Compares each project file's mtime to the binlog's; stale projects are parsed (XML) for `<ClCompile>` items not in the graph.  For each new source, a CL command is synthesised by mirroring a same-project peer's command line (`BuildGraphFactory.SplitCommandLine`, promoted to `internal`), and the resulting `.obj` is injected into every LINK/LIB command of the project.  Follows `<Import>` links to `.vcxitems` shared-item files.  Per-file metadata triggers a warning; PCH-creating peers are skipped.
 
 ## Key design decisions
 
 - **CreateWinMD skip**: C++/WinRT projects run `link.exe /WINMD:ONLY` (target `CreateWinMD`) before the real link.  Both declare the same `OutputFile`.  bt skips tasks where `GenerateWindowsMetadata == "Only"` at graph-build time -- it's structural metadata extraction, not inner-loop relevant.
 - **#include modelling**: Headers wire to source files (`header.h -> [#include] -> source.cpp`), not to obj files.  Synthetic `#include` commands carry the project name for `graph -p` filtering.
 - **Dry-run output**: Prints `cd <dir>` on stderr before each command on stdout, since MSBuild command lines mix relative and absolute paths.
+- **Inference never pollutes the cache**: inferred commands are ephemeral — not stored in the FlatBuffers cache.  They are re-derived on every invocation (N mtime stats normally; XML parse only when a project file's mtime > binlog's mtime).  Cache stays a pure binlog snapshot.  This also means inference is always fresh; stale inferred commands can't persist across source-tree changes.
 
 ## NativeAOT
 

@@ -106,6 +106,8 @@ bt graph -p XaBench -f main.cpp   # combine (AND)
 
 5. **Build** — `build` executes dirty commands in parallel, invoking `cl.exe`, `link.exe`, etc. directly — no MSBuild overhead. Environment variables (`INCLUDE`, `LIB`, `PATH`, etc.) are captured from the binlog's `SetEnv` tasks and replayed per-project.
 
+6. **Inference** — On every run, `bt` compares each project file's mtime against the binlog's. If a `.vcxproj` (or imported `.vcxitems`) is newer, `bt` parses it for `<ClCompile>` sources not yet in the graph and synthesises compile/link commands by mirroring flags from a peer source in the same project. This lets you add a `.cpp` to a project and immediately `bt build` — no full MSBuild run required. A warning is emitted if the new source has per-file metadata (optimization overrides etc.); in that case the peer's flags are used and a full rebuild is recommended for exact flags.
+
 ## Building
 
 For a local, self-contained build:
@@ -150,6 +152,15 @@ On first run, `publish.ps1` prompts for feed name and URL, saved to
   `bt` skips this step — it's a structural metadata extraction, not an
   inner-loop build concern.  If you add/remove/rename WinRT runtime classes,
   do a full `msbuild` rebuild.
+
+- **Inference uses peer flags for new sources.** If a newly added `<ClCompile>`
+  has per-file metadata (e.g. `<Optimization>Disabled</Optimization>`), `bt`
+  warns and falls back to mirroring the peer's flags.  Run `msbuild -bl` once
+  to get the exact flags into the binlog.
+
+- **Inference does not follow `.props`/`.targets` imports.** Sources added
+  via imported property sheets require MSBuild evaluation to enumerate.
+  Add such files directly to the `.vcxproj`, or do a full rebuild first.
 
 ## Requirements
 

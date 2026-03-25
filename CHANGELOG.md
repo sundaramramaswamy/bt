@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [17f1648]
+
+### Added
+- **Source inference**: when a `.vcxproj` (or imported `.vcxitems`) has a
+  newer mtime than the binlog, `bt dirty` / `bt build` automatically detect
+  new `<ClCompile>` sources not yet in the graph and synthesise compile/link
+  commands by mirroring flags from a peer source in the same project.
+  Add a `.cpp`, run `bt build` — no full MSBuild run required.
+  Per-file metadata (e.g. per-file optimisation overrides) triggers a warning
+  and falls back to peer flags; run `msbuild -bl` once for exact flags.
+
 ## [e3797be]
 
 ### Added

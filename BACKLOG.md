@@ -33,3 +33,15 @@
 - `build` replays SetEnv-provided environment (INCLUDE, LIB, PATH, etc.)
   from the binlog. Env vars set by other means (e.g. shell profile) are
   inherited from the current process but not captured.
+- Inferred sources use peer flags. Per-file `<ClCompile>` metadata
+  (optimization overrides, extra defines, etc.) is not applied — the peer's
+  flags are mirrored and a warning is emitted. Run `msbuild -bl` once for
+  exact flags.
+- Sources added via `.props`/`.targets` imports are not detected by inference
+  (requires full MSBuild property evaluation to enumerate). Add such files
+  directly to the `.vcxproj` or do a full rebuild first.
+
+## Optimization
+- [ ] Cache project file mtimes alongside the binlog timestamp so inference
+      is skipped on cache-hit paths entirely (currently re-runs on every
+      invocation, but costs only N mtime stats normally).
