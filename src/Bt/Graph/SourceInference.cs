@@ -66,11 +66,14 @@ static class SourceInference
                         $"{relPath}: has per-file metadata — using peer flags (run full build for exact flags)");
 
                 // ── Find a peer CL command ──────────────────────────────────────────
+                // Skip PCH creators (/Yc) during selection so we keep searching for a
+                // usable peer even when the same-directory candidate is pch.cpp.
                 CommandNode? peer = null;
                 var newSrcDir = Path.GetDirectoryName(relPath) ?? "";
                 foreach (var cmd in graph.Commands.Values)
                 {
                     if (cmd.Tool != "CL" || cmd.Project != proj || cmd.Inputs.Count == 0) continue;
+                    if (cmd.CommandLine.Contains("/Yc", StringComparison.OrdinalIgnoreCase)) continue;
                     if (peer == null) peer = cmd;
                     // Prefer a peer in the same directory.
                     if (string.Equals(
@@ -85,12 +88,7 @@ static class SourceInference
 
                 if (peer == null)
                 {
-                    warnings.Add($"{relPath}: no peer CL command in project, skipping");
-                    continue;
-                }
-                if (peer.CommandLine.Contains("/Yc", StringComparison.OrdinalIgnoreCase))
-                {
-                    warnings.Add($"{relPath}: peer is PCH creator, skipping");
+                    warnings.Add($"{relPath}: no usable peer CL command in project, skipping");
                     continue;
                 }
 
