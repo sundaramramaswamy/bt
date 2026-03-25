@@ -40,6 +40,15 @@
 - Sources added via `.props`/`.targets` imports are not detected by inference
   (requires full MSBuild property evaluation to enumerate). Add such files
   directly to the `.vcxproj` or do a full rebuild first.
+- New headers are invisible to dirtiness tracking until the next `msbuild -bl`.
+  `bt build` invokes `cl.exe` directly without MSBuild's file tracker, so no
+  tlog is written and no header→source edges are added to the graph.
+  Concretely: after `bt build` compiles a source that includes a brand-new
+  header, subsequent edits to that header will not mark the source as dirty
+  until `msbuild -bl` runs and writes a fresh tlog.  Affects all three cases:
+  (1) new `.h` included by an existing `.cpp` — dirty on source mtime the
+  first time, but future `.h`-only edits won't propagate until next full build;
+  (2/3) new `.h` and `.cpp` added together — same gap after the first `bt build`.
 
 ## Optimization
 - [ ] Cache project file mtimes alongside the binlog timestamp so inference
