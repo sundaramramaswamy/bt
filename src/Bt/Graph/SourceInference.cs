@@ -120,6 +120,14 @@ static class SourceInference
                     if (linkCmd.Project != proj) continue;
                     linkCmd.Inputs.Add(newObj);
                     graph.AddConsumer(newObj, linkCmd.Id);
+
+                    // Append the .obj to the stored command line so BuildCommand
+                    // picks it up (it executes CommandLine verbatim).
+                    var objForCmd = Path.GetRelativePath(
+                        linkCmd.WorkingDir, graph.ToAbsolute(newObj));
+                    linkCmd.CommandLine = objForCmd.Contains(' ')
+                        ? $"{linkCmd.CommandLine} \"{objForCmd}\""
+                        : $"{linkCmd.CommandLine} {objForCmd}";
                 }
 
                 inferredCount++;

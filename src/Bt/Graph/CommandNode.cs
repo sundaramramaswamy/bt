@@ -6,4 +6,8 @@ record CommandNode(
     List<string> Inputs,
     List<string> Outputs,
     string CommandLine = "",   // full tool invocation from binlog
-    string WorkingDir = "");   // project directory
+    string WorkingDir = "")   // project directory
+{
+    // Mutable so SourceInference can append inferred .obj files to LINK/LIB commands.
+    public string CommandLine { get; set; } = CommandLine;
+}
