@@ -235,6 +235,14 @@ static BuildGraph LoadGraph(string binlogPath)
     Console.Error.WriteLine($"{Clr.Dim}binlog:{Clr.Reset} {binlogPath}");
     {
         var build = BinaryLog.ReadBuild(binlogPath);
+        if (!build.Succeeded)
+        {
+            Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} binlog is from a failed build");
+            if (build.FirstError is { } err)
+                Console.Error.WriteLine($"  {Clr.Red}{err.File}({err.LineNumber}): {err.Text}{Clr.Reset}");
+            Console.Error.WriteLine($"Fix the build errors and re-run: {Clr.Dim}msbuild /bl{Clr.Reset}");
+            Environment.Exit(1);
+        }
         graph = BuildGraphFactory.FromBinlog(build);
     }
 
