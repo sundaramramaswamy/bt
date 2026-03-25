@@ -39,6 +39,7 @@ static class WatchCommand
         var pendingLock = new object();
         var buildInProgress = false;
         var rerunNeeded = false;
+        var projFileChanged = false;
         Timer? debounceTimer = null;
         var cts = new CancellationTokenSource();
         var binlogStamp = File.GetLastWriteTimeUtc(binlogPath);
@@ -53,22 +54,31 @@ static class WatchCommand
         void TriggerBuild()
         {
             HashSet<string> batch;
+            bool needReload;
             lock (pendingLock)
             {
-                if (pending.Count == 0) return;
+                if (pending.Count == 0 && !projFileChanged) return;
                 if (buildInProgress) { rerunNeeded = true; return; }
                 batch = new HashSet<string>(pending, StringComparer.OrdinalIgnoreCase);
                 pending.Clear();
+                needReload = projFileChanged;
+                projFileChanged = false;
                 buildInProgress = true;
             }
 
-            // Check if binlog was updated externally → reload graph
+            // Check if binlog was updated externally → also reload
             var currentBinlogStamp = File.GetLastWriteTimeUtc(binlogPath);
             if (currentBinlogStamp != binlogStamp)
             {
                 Console.Error.WriteLine($"\n{Clr.Yellow}Binlog changed — reloading graph...{Clr.Reset}");
+                needReload = true;
+            }
+            if (needReload)
+            {
                 try
                 {
+                    if (currentBinlogStamp == binlogStamp)
+                        Console.Error.WriteLine($"\n{Clr.Yellow}Project file changed — reloading graph...{Clr.Reset}");
                     graph = loadGraph(binlogPath);
                     binlogStamp = currentBinlogStamp;
                     watchedCount = 0;
@@ -90,21 +100,30 @@ static class WatchCommand
                 if (r != null) resolved.Add(r);
             }
 
-            if (resolved.Count == 0)
+            if (resolved.Count == 0 && batch.Count > 0)
             {
                 lock (pendingLock) { buildInProgress = false; }
                 return;
             }
 
-            var timestamp = DateTime.Now.ToString("HH:mm:ss");
-            Console.Error.WriteLine($"\n{Clr.Bold}--- {timestamp} ---{Clr.Reset}");
-            var sortedResolved = new List<string>(resolved);
-            sortedResolved.Sort(StringComparer.OrdinalIgnoreCase);
-            foreach (var f in sortedResolved)
-                Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
-            Console.Error.WriteLine();
-
-            var rc = BuildCommand.RunBuild(graph, resolved.ToArray(), maxJobs, dryRun: false);
+            // Project-file-only change after reload: run full mtime dirty check.
+            // Explicit file list: build only those files.
+            BuildCommand.BuildResult rc;
+            if (resolved.Count > 0)
+            {
+                var timestamp = DateTime.Now.ToString("HH:mm:ss");
+                Console.Error.WriteLine($"\n{Clr.Bold}--- {timestamp} ---{Clr.Reset}");
+                var sortedResolved = new List<string>(resolved);
+                sortedResolved.Sort(StringComparer.OrdinalIgnoreCase);
+                foreach (var f in sortedResolved)
+                    Console.Error.WriteLine($"  {Clr.Green}{f}{Clr.Reset}");
+                Console.Error.WriteLine();
+                rc = BuildCommand.RunBuild(graph, resolved.ToArray(), maxJobs, dryRun: false);
+            }
+            else
+            {
+                rc = BuildCommand.RunBuild(graph, [], maxJobs, dryRun: false);
+            }
 
             if (rc == BuildCommand.BuildResult.Succeeded && !string.IsNullOrEmpty(runCmd))
             {
@@ -131,6 +150,17 @@ static class WatchCommand
         void OnFileEvent(string fullPath)
         {
             var ext = Path.GetExtension(fullPath);
+
+            // Project file changed → flag graph reload (re-runs inference).
+            if (ext.Equals(".vcxproj", StringComparison.OrdinalIgnoreCase) ||
+                ext.Equals(".vcxitems", StringComparison.OrdinalIgnoreCase))
+            {
+                lock (pendingLock) { projFileChanged = true; }
+                debounceTimer?.Dispose();
+                debounceTimer = new Timer(_ => TriggerBuild(), null, debounceMs, Timeout.Infinite);
+                return;
+            }
+
             if (!watchExts.Contains(ext)) return;
 
             // Skip editor temporaries: Emacs (.#file, #file#), Vim (.swp/.swo), backups (~)
