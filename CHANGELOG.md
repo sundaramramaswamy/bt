@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [Unreleased]
+
+### Changed
+- **Unified help rendering**: `-?`, `/?`, `-h`, `--help`, `help`, and
+  no-args all flow through a single `ColoredHelpAction` backed by
+  System.CommandLine's `HelpOption`, replacing the previous dual code-path
+  (manual arg check + System.CommandLine default). `/?` and subcommand
+  help (e.g. `bt build /?`) now show the same coloured output.
+
+### Fixed
+- `--color never` is now respected on all help paths (previously ignored
+  when `--help` / `-?` / `/?` triggered the help action).
+- `bt --color never help` no longer fails with "unrecognized command".
+
 ## [17f1648]
 
 ### Added
