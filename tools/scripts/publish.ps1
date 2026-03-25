@@ -56,7 +56,10 @@ try {
     # --- Pack nupkg via dotnet pack with custom nuspec ---
     Write-Host "Packing Bt $version ..." -ForegroundColor Cyan
     $nuspecPath = Join-Path $root 'tools\scripts\bt.nuspec'
-    dotnet pack src\Bt\Bt.csproj --no-build --no-restore `
+    # Restore without a RID so the assets file has a plain net8.0 target
+    # (the publish steps restore with -r, leaving only RID-specific targets).
+    dotnet restore src\Bt\Bt.csproj -v quiet
+    dotnet pack src\Bt\Bt.csproj --no-build --no-restore -c Release `
         /p:NuspecFile="$nuspecPath" `
         /p:NuspecBasePath="$root" `
         /p:NuspecProperties="version=$version" `
