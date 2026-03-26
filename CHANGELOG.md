@@ -5,18 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
-## [Unreleased]
+## [be4f896]
+
+### Added
+- **Failed-binlog guard**: `bt` now rejects binlogs from failed builds,
+  printing the first error and exiting.  Previously a broken binlog
+  produced an incomplete graph (e.g. missing LINK commands) that
+  silently compiled but never linked.
 
 ### Changed
-- **Unified help rendering**: `-?`, `/?`, `-h`, `--help`, `help`, and
-  no-args all flow through a single `ColoredHelpAction` backed by
-  System.CommandLine's `HelpOption`, replacing the previous dual code-path
-  (manual arg check + System.CommandLine default). `/?` and subcommand
-  help (e.g. `bt build /?`) now show the same coloured output.
+- `/?` and subcommand help (e.g. `bt build /?`) now show the same
+  coloured output as `--help` / `-?`.
+- `bt watch` detects `.vcxproj` / `.vcxitems` edits and reloads the
+  graph (re-running inference).  Previously, removing a source from
+  the project file had no effect until the watcher was restarted.
 
 ### Fixed
-- `--color never` is now respected on all help paths (previously ignored
-  when `--help` / `-?` / `/?` triggered the help action).
+- **Inferred objs missing from linker**: inferred `.obj` files were
+  added to the graph edges but not to the LINK/LIB command line.
+  Compile succeeded, link used the stale command.
+- `--color never` is now respected on all help paths (previously
+  ignored when `--help` / `-?` / `/?` triggered the help action).
 - `bt --color never help` no longer fails with "unrecognized command".
 
 ## [17f1648]

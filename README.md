@@ -127,8 +127,8 @@ dotnet publish src/Bt -c Release -r win-arm64   # or win-x64, linux-x64
 
 ``` powershell
 # One-time: install bt.exe to ~/tools (already on PATH)
-nuget install Bt -Source <feed> -OutputDirectory $env:TEMP\bt-pkg -ExcludeVersion
-Copy-Item $env:TEMP\bt-pkg\Bt\tools\win-$env:PROCESSOR_ARCHITECTURE\bt.exe ~\tools\
+nuget install Bt -Source <feed> -PreRelease -OutputDirectory $env:TEMP\bt-pkg -ExcludeVersion
+Copy-Item "$env:TEMP\bt-pkg\Bt\tools\win-$(if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {'arm64'} else {'x64'})\bt.exe" ~\tools\
 Remove-Item $env:TEMP\bt-pkg -Recurse
 ```
 
