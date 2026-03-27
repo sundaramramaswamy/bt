@@ -65,7 +65,10 @@ static class BuildCommand
                 Console.Error.WriteLine($"{Clr.Cyan}[{cmd.Tool}]{Clr.Reset} {Clr.Dim}{cmd.Project}{Clr.Reset}");
                 if (!string.IsNullOrEmpty(cmd.WorkingDir))
                     Console.Error.WriteLine($"  {Clr.Dim}cd {cmd.WorkingDir}{Clr.Reset}");
-                Console.WriteLine(cmd.CommandLine);
+                if (!string.IsNullOrEmpty(cmd.CommandLine))
+                    Console.WriteLine(cmd.CommandLine);
+                else if (cmd.Tool == "Copy" && cmd.Inputs.Count > 0 && cmd.Outputs.Count > 0)
+                    Console.WriteLine($"copy \"{g.ToAbsolute(cmd.Inputs[0])}\" \"{g.ToAbsolute(cmd.Outputs[0])}\"");
                 Console.Error.WriteLine();
             }
             return BuildResult.Succeeded;  // dry-run always "succeeds"
@@ -147,7 +150,7 @@ static class BuildCommand
             Parallel.ForEach(wave, new ParallelOptions { MaxDegreeOfParallelism = maxJobs }, cmd =>
             {
                 WriteStatus(cmd.Tool, cmd.Outputs.Count > 0 ? cmd.Outputs[0] : cmd.Id, done: false);
-                var (exitCode, output) = ExecuteCommand(cmd, envByProject.GetValueOrDefault(cmd.Project));
+                var (exitCode, output) = ExecuteCommand(cmd, g, envByProject.GetValueOrDefault(cmd.Project));
                 Interlocked.Increment(ref completed);
                 results.Add((cmd, exitCode, output));
                 WriteStatus(cmd.Tool, cmd.Outputs.Count > 0 ? cmd.Outputs[0] : cmd.Id, done: true, failed: exitCode != 0);
@@ -217,8 +220,11 @@ static class BuildCommand
         return failures > 0 ? BuildResult.Failed : BuildResult.Succeeded;
     }
 
-    public static (int exitCode, string output) ExecuteCommand(CommandNode cmd, Dictionary<string, string>? env = null)
+    public static (int exitCode, string output) ExecuteCommand(CommandNode cmd, BuildGraph graph, Dictionary<string, string>? env = null)
     {
+        if (cmd.Tool == "Copy" && cmd.Inputs.Count > 0 && cmd.Outputs.Count > 0)
+            return ExecuteCopy(cmd, graph);
+
         var cmdLine = cmd.CommandLine;
         string exe, args;
 
@@ -273,6 +279,23 @@ static class BuildCommand
             proc.WaitForExit();
             var output = (stdout + stderr).Trim();
             return (proc.ExitCode, output);
+        }
+        catch (Exception ex)
+        {
+            return (1, ex.Message);
+        }
+    }
+
+    static (int exitCode, string output) ExecuteCopy(CommandNode cmd, BuildGraph graph)
+    {
+        try
+        {
+            var src = graph.ToAbsolute(cmd.Inputs[0]);
+            var dst = graph.ToAbsolute(cmd.Outputs[0]);
+            var dstDir = Path.GetDirectoryName(dst);
+            if (dstDir is not null) Directory.CreateDirectory(dstDir);
+            File.Copy(src, dst, overwrite: true);
+            return (0, "");
         }
         catch (Exception ex)
         {
