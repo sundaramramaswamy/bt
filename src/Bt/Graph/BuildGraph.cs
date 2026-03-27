@@ -403,11 +403,28 @@ class BuildGraph
                 foreach (var input in cmd.Inputs)
                     CollectSyntheticSources(input, allInputs);
 
-                // Find the newest input and which file it is
+                // Build a set of output directories so we can skip inputs that
+                // live alongside outputs (build intermediates like pch_hdr.src).
+                // Their dirtiness should propagate via the producer path, not
+                // via mtime — otherwise timestamp drift on generated files
+                // causes false rebuilds.
+                var outputDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var o in cmd.Outputs)
+                {
+                    var d = Path.GetDirectoryName(o);
+                    if (d is not null) outputDirs.Add(d);
+                }
+
                 DateTime maxInputTime = DateTime.MinValue;
                 string? newestInput = null;
                 foreach (var input in allInputs)
                 {
+                    // Skip inputs co-located with outputs — they are build
+                    // intermediates (e.g. pch_hdr.src in an obj directory),
+                    // not user-edited sources.
+                    var inputDir = Path.GetDirectoryName(input);
+                    if (inputDir is not null && outputDirs.Contains(inputDir)) continue;
+
                     var mtime = mtimeCache.GetValueOrDefault(input);
                     if (mtime is { } t && t > maxInputTime)
                     {
