@@ -489,7 +489,10 @@ static class BuildGraphFactory
                 if (string.Equals(srcRel, dstRel, StringComparison.OrdinalIgnoreCase)) continue;
 
                 var cmdId = $"Copy#{cmdIndex++}:{proj7}/{target7}";
-                var cmd = new CommandNode(cmdId, "Copy", proj7, target7, [srcRel], [dstRel], WorkingDir: projDir7);
+                var absSrc = ResolveAbsolute(projDir7, srcItems[i]);
+                var absDst = ResolveAbsolute(projDir7, dstItems[i]);
+                var copyCmd = $"copy \"{absSrc}\" \"{absDst}\"";
+                var cmd = new CommandNode(cmdId, "Copy", proj7, target7, [srcRel], [dstRel], copyCmd, projDir7);
                 graph.Commands[cmdId] = cmd;
                 graph.AddConsumer(srcRel, cmdId);
                 graph.Files.TryAdd(dstRel, new FileNode(dstRel, FileKinds.Classify(dstRel)));

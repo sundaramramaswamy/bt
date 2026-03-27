@@ -63,12 +63,9 @@ static class BuildCommand
             foreach (var cmd in plan)
             {
                 Console.Error.WriteLine($"{Clr.Cyan}[{cmd.Tool}]{Clr.Reset} {Clr.Dim}{cmd.Project}{Clr.Reset}");
-                if (!string.IsNullOrEmpty(cmd.WorkingDir))
+                if (cmd.Tool != "Copy" && !string.IsNullOrEmpty(cmd.WorkingDir))
                     Console.Error.WriteLine($"  {Clr.Dim}cd {cmd.WorkingDir}{Clr.Reset}");
-                if (!string.IsNullOrEmpty(cmd.CommandLine))
-                    Console.WriteLine(cmd.CommandLine);
-                else if (cmd.Tool == "Copy" && cmd.Inputs.Count > 0 && cmd.Outputs.Count > 0)
-                    Console.WriteLine($"copy \"{g.ToAbsolute(cmd.Inputs[0])}\" \"{g.ToAbsolute(cmd.Outputs[0])}\"");
+                Console.WriteLine(cmd.CommandLine);
                 Console.Error.WriteLine();
             }
             return BuildResult.Succeeded;  // dry-run always "succeeds"
