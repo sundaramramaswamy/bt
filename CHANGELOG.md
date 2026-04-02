@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [feb2e45]
+
+### Added
+- `graph --headers` — when used with `-f`, includes all tlog-recorded
+  `#include` headers in the subgraph (repo-local only, SDK headers
+  excluded via `IsExternal`).
+- `srcs --headers` — shows tlog-recorded headers in the upstream
+  dependency tree.  Greppable flat list of all headers a source
+  transitively includes.
+
+### Changed
+- Copy commands use `File.Copy` instead of shelling out to `cmd.exe`.
+  Works in non-standard shells (e.g. MSYS2), no subprocess overhead.
+  Dry-run shows absolute paths, no `cd` line.
+
+### Fixed
+- **`graph -f` showed broken `#include` edges**: depending on cache
+  state, 0 headers (fresh parse) or 1 random header (cache hit) were
+  shown.  Default now shows a clean build chain with no `#include`
+  edges.  Use `--headers` to opt into the full set.
+- **False rebuilds from intermediate timestamps**: `build` no longer
+  triggers spurious LIB/LINK/Copy rebuilds when co-located build
+  intermediates (e.g. `pch_hdr.src`) have newer timestamps than
+  outputs.
+
 ## [be4f896]
 
 ### Added
