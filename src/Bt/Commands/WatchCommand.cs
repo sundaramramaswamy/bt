@@ -32,6 +32,7 @@ static class WatchCommand
             {
                 Console.Error.WriteLine($"{Clr.Red}Initial build failed{Clr.Reset}");
             }
+            Telemetry.LogCommand("watch", rc != BuildCommand.BuildResult.Failed);
         }
 
         // State
@@ -133,6 +134,7 @@ static class WatchCommand
                 if (exitCode != 0)
                     Console.Error.WriteLine($"{Clr.Red}Exit {exitCode}{Clr.Reset}");
             }
+            Telemetry.LogCommand("watch", rc == BuildCommand.BuildResult.Succeeded);
 
             Console.Error.WriteLine($"{Clr.Dim}Waiting for changes...{Clr.Reset}");
 

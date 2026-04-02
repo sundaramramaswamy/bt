@@ -99,6 +99,12 @@ var btVersionShort = plusIdx < 0 ? btVersion
     : btVersion.Contains("-ci.") ? btVersion[..plusIdx]
     : btVersion[..Math.Min(btVersion.Length, plusIdx + 8)];
 
+Telemetry.Version = btVersionShort;
+
+// Hidden verb: child process posts telemetry and exits.
+if (args.Length >= 2 && args[0] == "--telemetry")
+    return Telemetry.Post(args);
+
 if (args.Length == 1 && args[0] is "--version")
 {
     Console.WriteLine(btVersionShort);
@@ -187,7 +193,16 @@ watchCmd.SetAction(result =>
     return WatchCommand.RunWatch(g, Path.GetFullPath(binlog), debounceMs, LoadGraph, runCmd);
 });
 
-return root.Parse(args).Invoke();
+var parseResult = root.Parse(args);
+var exitCode = parseResult.Invoke();
+
+// Fire-and-forget telemetry for real commands (not help/version/no-args)
+var cmdName = parseResult.CommandResult.Command.Name;
+var isHelp = args.Any(a => a is "-?" or "-h" or "--help" or "/?" or "help");
+if (cmdName != root.Name && !isHelp && cmdName != "watch")
+    Telemetry.LogCommand(cmdName, exitCode == 0);
+
+return exitCode;
 
 // -- Helpers --
 BuildGraph Setup(ParseResult result)
