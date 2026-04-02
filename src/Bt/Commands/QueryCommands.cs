@@ -13,7 +13,7 @@ static class QueryCommands
         return 0;
     }
 
-    public static int SourcesOf(BuildGraph g, string[] files)
+    public static int SourcesOf(BuildGraph g, string[] files, bool includeHeaders = false)
     {
         foreach (var file in files)
         {
@@ -21,7 +21,7 @@ static class QueryCommands
             if (resolved == null) continue;
             Console.WriteLine($"{Clr.Cyan}{resolved}{Clr.Reset}");
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            GraphCommand.PrintTreeBackward(g, resolved, "", true, seen);
+            GraphCommand.PrintTreeBackward(g, resolved, "", true, seen, includeHeaders);
         }
         return 0;
     }

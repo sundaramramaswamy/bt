@@ -182,12 +182,14 @@ class BuildGraph
     /// Get all files reachable from the given file, both forward and backward.
     /// Unlike GetOutputsOf/GetSourcesOf, this returns EVERY node on the path,
     /// not just endpoints. Used for graph filtering.
-    public HashSet<string> GetReachable(string filePath)
+    public HashSet<string> GetReachable(string filePath, bool includeHeaders = false)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         CollectForward(filePath, result);
         result.Remove(filePath); // allow backward walk to re-enter at start node
         CollectBackward(filePath, result);
+        if (includeHeaders)
+            CollectSyntheticBackward(filePath, result);
         return result;
     }
 
@@ -208,8 +210,27 @@ class BuildGraph
         if (!visited.Add(filePath)) return;
         if (!FileToProducer.TryGetValue(filePath, out var producerId)) return;
         if (!Commands.TryGetValue(producerId, out var cmd)) return;
+        // Skip synthetic commands — their edges are incomplete in FileToProducer
+        // (1:1 can't represent N headers). Use CollectSyntheticBackward instead.
+        if (cmd.Tool.StartsWith('#')) return;
         foreach (var input in cmd.Inputs)
             CollectBackward(input, visited);
+    }
+
+    /// Walk backward through SyntheticProducers to collect all tlog-recorded
+    /// headers for source files in the visited set. Non-recursive: headers
+    /// aren't keys in SyntheticProducers (tlog data is flat).
+    void CollectSyntheticBackward(string filePath, HashSet<string> visited)
+    {
+        // Snapshot: iterate a copy since CollectSyntheticSources modifies visited
+        var sources = new List<string>();
+        if (SyntheticProducers.ContainsKey(filePath))
+            sources.Add(filePath);
+        foreach (var f in visited.ToList())
+            if (f != filePath && SyntheticProducers.ContainsKey(f))
+                sources.Add(f);
+        foreach (var src in sources)
+            CollectSyntheticSources(src, visited);
     }
 
     /// Given a set of changed files, find all commands that need to re-run,

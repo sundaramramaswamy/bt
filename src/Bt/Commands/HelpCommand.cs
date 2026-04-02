@@ -85,12 +85,14 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}-f, --file{Clr.Reset} <path>     Subgraph reachable from/to file
           {Clr.Green}-p, --project{Clr.Reset} <name>  Only nodes from project
+          {Clr.Green}--headers{Clr.Reset}              Include #include headers in -f subgraph
           {Clr.Green}--binlog{Clr.Reset} <path>       Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
           {Clr.Green}--color{Clr.Reset}  <mode>       auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
 
         {Clr.Yellow}Examples:{Clr.Reset}
           {Clr.Dim}bt graph | dot -Tsvg -o build.svg{Clr.Reset}
           {Clr.Dim}bt graph -f TestDataItem.h{Clr.Reset}
+          {Clr.Dim}bt graph -f main.cpp --headers{Clr.Reset}
           {Clr.Dim}bt graph -p XaBench -f main.cpp{Clr.Reset}
         """;
 
@@ -115,17 +117,19 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
 
         {Clr.Bold}bt srcs{Clr.Reset} — Upstream dependency tree for <file>
 
-        {Clr.Yellow}Usage:{Clr.Reset}  bt srcs <files>
+        {Clr.Yellow}Usage:{Clr.Reset}  bt srcs [options] <files>
 
         {Clr.Yellow}Arguments:{Clr.Reset}
           {Clr.Cyan}<files>{Clr.Reset}  Output files to query
 
         {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}--headers{Clr.Reset}          Include tlog-recorded #include headers
           {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
           {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
 
-        {Clr.Yellow}Example:{Clr.Reset}
+        {Clr.Yellow}Examples:{Clr.Reset}
           {Clr.Dim}bt srcs XaBench.exe{Clr.Reset}
+          {Clr.Dim}bt srcs --headers Tracing.cpp{Clr.Reset}
         """;
 
     static string DirtyHelp() => $"""

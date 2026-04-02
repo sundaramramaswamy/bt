@@ -19,8 +19,10 @@ var graphFileOption = new Option<string[]>("--file") { Description = "Filter gra
 graphFileOption.Aliases.Add("-f");
 var graphProjectOption = new Option<string[]>("--project") { Description = "Filter graph to nodes belonging to these projects", Arity = ArgumentArity.OneOrMore };
 graphProjectOption.Aliases.Add("-p");
+var graphHeadersOption = new Option<bool>("--headers") { Description = "Include tlog-recorded #include headers in -f subgraph" };
 graphCmd.Add(graphFileOption);
 graphCmd.Add(graphProjectOption);
+graphCmd.Add(graphHeadersOption);
 
 var outputsFilesArg = new Argument<string[]>("files") { Description = "Source files to query", Arity = ArgumentArity.OneOrMore };
 var outputsOfCmd = new Command("bins", "Downstream dependency tree from <file>");
@@ -28,7 +30,9 @@ outputsOfCmd.Add(outputsFilesArg);
 
 var sourcesFilesArg = new Argument<string[]>("files") { Description = "Output files to query", Arity = ArgumentArity.OneOrMore };
 var sourcesOfCmd = new Command("srcs", "List all upstream files that feed into <file>");
+var srcsHeadersOption = new Option<bool>("--headers") { Description = "Include tlog-recorded #include headers" };
 sourcesOfCmd.Add(sourcesFilesArg);
+sourcesOfCmd.Add(srcsHeadersOption);
 
 var affectedFilesArg = new Argument<string[]>("files") { Description = "Changed files (default: git diff)", Arity = ArgumentArity.ZeroOrMore };
 var affectedCmd = new Command("dirty", "Build plan for changed files");
@@ -122,7 +126,8 @@ graphCmd.SetAction(result =>
     var g = Setup(result);
     var filterFiles = result.GetValue(graphFileOption);
     var filterProjects = result.GetValue(graphProjectOption);
-    return GraphCommand.ShowGraph(g, filterFiles, filterProjects);
+    var includeHeaders = result.GetValue(graphHeadersOption);
+    return GraphCommand.ShowGraph(g, filterFiles, filterProjects, includeHeaders);
 });
 
 outputsOfCmd.SetAction(result =>
@@ -136,7 +141,8 @@ sourcesOfCmd.SetAction(result =>
 {
     var g = Setup(result);
     var files = result.GetValue(sourcesFilesArg)!;
-    return QueryCommands.SourcesOf(g, files);
+    var includeHeaders = result.GetValue(srcsHeadersOption);
+    return QueryCommands.SourcesOf(g, files, includeHeaders);
 });
 
 affectedCmd.SetAction(result =>

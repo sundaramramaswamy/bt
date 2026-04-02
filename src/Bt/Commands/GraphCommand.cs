@@ -1,6 +1,6 @@
 static class GraphCommand
 {
-    public static int ShowGraph(BuildGraph g, string[]? filterFiles, string[]? filterProjects)
+    public static int ShowGraph(BuildGraph g, string[]? filterFiles, string[]? filterProjects, bool includeHeaders = false)
     {
         // Compute the set of allowed nodes when filters are active.
         HashSet<string>? allowed = null;
@@ -13,7 +13,7 @@ static class GraphCommand
                 var resolved = FileResolver.Resolve(g, arg);
                 if (resolved == null) continue;
                 // Include everything reachable forward and backward (all intermediate nodes too)
-                foreach (var r in g.GetReachable(resolved)) allowed.Add(r);
+                foreach (var r in g.GetReachable(resolved, includeHeaders)) allowed.Add(r);
             }
             if (allowed.Count == 0) { Console.Error.WriteLine("No matching files in graph."); return 1; }
         }
@@ -153,27 +153,50 @@ static class GraphCommand
         }
     }
 
-    public static void PrintTreeBackward(BuildGraph g, string filePath, string indent, bool last, HashSet<string> seen)
+    public static void PrintTreeBackward(BuildGraph g, string filePath, string indent, bool last, HashSet<string> seen, bool includeHeaders = false)
     {
-        if (!g.FileToProducer.TryGetValue(filePath, out var producerId)) return;
-        if (!g.Commands.TryGetValue(producerId, out var cmd)) return;
+        var children = new List<(string tool, string input)>();
+        var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var sortedInputs = new List<string>(cmd.Inputs);
-        sortedInputs.Sort(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < sortedInputs.Count; i++)
+        // Real producer chain (CL → .obj, LINK → .exe, etc.)
+        if (g.FileToProducer.TryGetValue(filePath, out var producerId)
+            && g.Commands.TryGetValue(producerId, out var cmd)
+            && !cmd.Tool.StartsWith('#'))
         {
-            var input = sortedInputs[i];
-            var isLast = i == sortedInputs.Count - 1;
+            foreach (var input in cmd.Inputs)
+            {
+                children.Add((cmd.Tool, input));
+                added.Add(input);
+            }
+        }
+
+        // Synthetic #include headers (from tlog) — skip duplicates
+        if (includeHeaders && g.SyntheticProducers.TryGetValue(filePath, out var synIds))
+        {
+            foreach (var synId in synIds)
+            {
+                if (!g.Commands.TryGetValue(synId, out var synCmd)) continue;
+                foreach (var input in synCmd.Inputs)
+                    if (!g.IsExternal(input) && added.Add(input))
+                        children.Add((synCmd.Tool, input));
+            }
+        }
+
+        children.Sort((a, b) => string.Compare(a.input, b.input, StringComparison.OrdinalIgnoreCase));
+        for (int i = 0; i < children.Count; i++)
+        {
+            var (tool, input) = children[i];
+            var isLast = i == children.Count - 1;
             var branch = isLast ? "└── " : "├── ";
             var cont   = isLast ? "    " : "│   ";
 
             if (!seen.Add(input))
             {
-                Console.WriteLine($"{indent}{branch}{Clr.Dim}[{cmd.Tool}] {input} (↑ above){Clr.Reset}");
+                Console.WriteLine($"{indent}{branch}{Clr.Dim}[{tool}] {input} (↑ above){Clr.Reset}");
                 continue;
             }
-            Console.WriteLine($"{indent}{branch}{Clr.Dim}[{cmd.Tool}]{Clr.Reset} {FileClr(g, input)}{input}{Clr.Reset}");
-            PrintTreeBackward(g, input, indent + cont, isLast, seen);
+            Console.WriteLine($"{indent}{branch}{Clr.Dim}[{tool}]{Clr.Reset} {FileClr(g, input)}{input}{Clr.Reset}");
+            PrintTreeBackward(g, input, indent + cont, isLast, seen, includeHeaders);
         }
     }
 }
