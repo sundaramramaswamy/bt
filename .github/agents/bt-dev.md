@@ -54,15 +54,14 @@ The IL2104 trim warning persists (StructuredLogger isn't AOT-annotated) but is h
 
 ## Telemetry
 
-`Telemetry.cs` sends anonymous usage events to Azure Application Insights via raw HTTP POST (no SDK dependency).  Zero latency on the main process — telemetry is sent by spawning a detached child `bt --telemetry <args>` process that POSTs and exits independently.
+`Telemetry.cs` sends anonymous usage events to Azure Application Insights via raw HTTP POST (no SDK dependency).  Zero latency on the main process — telemetry is sent by spawning a detached `curl.exe` process (~300KB, inbox on Win10+) that POSTs and exits independently.
 
-- **What's sent**: command name, bt version, success/failure, count (for `watch`).  No file paths, no usernames, no repo names.
-- **Mechanism**: `Telemetry.LogCommand()` calls `Process.Start(bt.exe, "--telemetry", ...)` with `CreateNoWindow=true`.  Parent doesn't wait (~2ms overhead).  Child does `HttpClient.PostAsync` to the AppInsights v2/track endpoint with a 5s timeout.
-- **Hidden verb**: `--telemetry` is intercepted early in `Program.cs` (before System.CommandLine parsing) and routes to `Telemetry.Post()` which constructs the AppInsights JSON envelope and POSTs it.
-- **What's excluded**: `--help`, `-?`, `/?`, `--version`, no-args, and `help` — detected via args scan in `Program.cs`.  `watch` logs per-build from `WatchCommand.cs` instead of once from `Program.cs`.
-- **AppInsights resource**: `appi-bt-prod` in Azure, connection string baked into `Telemetry.cs`.  The instrumentation key is ingest-only (write-only, not a secret).
+- **What's sent**: command name, flags (names only, no values), bt version, success/failure, count (for `watch`).  No file paths, no usernames, no repo names.
+- **Mechanism**: `Telemetry.LogCommand()` calls `Process.Start("curl.exe", "-s", "-X", "POST", ...)` with `CreateNoWindow=true`.  Parent doesn't wait (~2ms overhead).  `curl.exe` is ~300KB, likely already warm in the filesystem cache.
+- **What's excluded**: `--help`, `-?`, `/?`, `--version`, no-args, and `help` — detected via args scan in `Program.cs`.  `--binlog`/`--color` flags stripped from the flags property.  `watch` logs per-build from `WatchCommand.cs` instead of once from `Program.cs`.
+- **AppInsights resource**: `appi-bt-prod` in Azure, instrumentation key baked into `Telemetry.cs`.  Ingest-only (write-only, not a secret).
 - **Querying**: Azure Portal → AppInsights → Logs blade → KQL on `customEvents` table.  Data includes auto-captured timestamp, client IP (→ geo), and anonymous device ID.
-- **Design alternatives considered**: (1) local log file — users never read it; (2) AppInsights SDK — 2MB binary bloat + AOT compat concerns; (3) sync POST with flush — 500ms+ latency unacceptable for a 50ms tool; (4) Task.Run fire-and-forget — process exits before POST completes.  Detached child process was the winning design.
+- **Design alternatives considered**: (1) local log file — users never read it; (2) AppInsights SDK — 2MB binary bloat + AOT compat concerns; (3) sync POST with flush — 500ms+ latency unacceptable for a 50ms tool; (4) Task.Run fire-and-forget — process exits before POST completes; (5) bt self-spawn with `--telemetry` verb — works but pages in 14MB NativeAOT image vs 300KB curl.
 
 ## Commit conventions
 
