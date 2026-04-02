@@ -101,10 +101,6 @@ var btVersionShort = plusIdx < 0 ? btVersion
 
 Telemetry.Version = btVersionShort;
 
-// Hidden verb: child process posts telemetry and exits.
-if (args.Length >= 2 && args[0] == "--telemetry")
-    return Telemetry.Post(args);
-
 if (args.Length == 1 && args[0] is "--version")
 {
     Console.WriteLine(btVersionShort);
@@ -200,7 +196,11 @@ var exitCode = parseResult.Invoke();
 var cmdName = parseResult.CommandResult.Command.Name;
 var isHelp = args.Any(a => a is "-?" or "-h" or "--help" or "/?" or "help");
 if (cmdName != root.Name && !isHelp && cmdName != "watch")
-    Telemetry.LogCommand(cmdName, exitCode == 0);
+{
+    // Extract flag names only (strip values) for feature-usage insight
+    var flags = string.Join(" ", args.Where(a => a.StartsWith('-') && !a.StartsWith("--binlog") && !a.StartsWith("--color")));
+    Telemetry.LogCommand(cmdName, exitCode == 0, flags);
+}
 
 return exitCode;
 
