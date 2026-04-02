@@ -61,6 +61,7 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         {Clr.Yellow}Graph filters:{Clr.Reset}
           {Clr.Green}-f, --file{Clr.Reset} <path>     Subgraph reachable from/to file
           {Clr.Green}-p, --project{Clr.Reset} <name>  Only nodes from project
+          {Clr.Green}--headers{Clr.Reset}             Include #include headers (graph -f, srcs)
 
         {Clr.Yellow}Examples:{Clr.Reset}
           {Clr.Dim}bt graph | dot -Tsvg -o build.svg{Clr.Reset}
@@ -85,7 +86,7 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}-f, --file{Clr.Reset} <path>     Subgraph reachable from/to file
           {Clr.Green}-p, --project{Clr.Reset} <name>  Only nodes from project
-          {Clr.Green}--headers{Clr.Reset}              Include #include headers in -f subgraph
+          {Clr.Green}--headers{Clr.Reset}             Include #include headers in -f subgraph
           {Clr.Green}--binlog{Clr.Reset} <path>       Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
           {Clr.Green}--color{Clr.Reset}  <mode>       auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
 
@@ -123,7 +124,7 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
           {Clr.Cyan}<files>{Clr.Reset}  Output files to query
 
         {Clr.Yellow}Options:{Clr.Reset}
-          {Clr.Green}--headers{Clr.Reset}          Include tlog-recorded #include headers
+          {Clr.Green}--headers{Clr.Reset}        Include tlog-recorded #include headers
           {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
           {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
 
