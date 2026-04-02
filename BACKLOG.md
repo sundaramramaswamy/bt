@@ -1,6 +1,12 @@
 # Backlog
 
 ## Optimization
+- [x] ~~Missing headers of cpp in `graph -f`~~
+  Analysed: `CollectBackward` only walks `FileToProducer` (1:1), missing
+  the `SyntheticProducers` (1:N) map used by mtime/dirty paths.  Fresh
+  parse shows 0 headers; cache hit shows 1 random header.  Fixed: default
+  `graph -f` now shows clean build chain (no `#include` edges); `--headers`
+  flag on `graph` and `srcs` opts into full tlog header display.
 - [x] ~~Filter generated/SDK headers from mtime dirty sweep~~
       Done: uses CAExcludePath from binlog
 - [x] ~~FlatBuffers cache~~ — replaced gzip+JSON with FlatSharp (FlatBuffers).
@@ -19,6 +25,23 @@
 ## Features
 - [ ] `build --profile` — report per-command wall-clock time to identify build
       bottlenecks
+- [ ] `build -f` prereq-missing warning — `build -f Tracing.cpp` assumes
+      prerequisites (e.g. `pch.pch`) exist.  If a build-artifact input is
+      missing on disk, warn the user and suggest `build` (no `-f`) or
+      `build -f pch.cpp`.  Analysis: `GetAffectedCommands` walks forward
+      only (source → consumers → outputs); it never discovers the `/Yc`
+      producer of `pch.pch` because that's a co-input, not upstream.  The
+      wave executor seeds `produced` with out-of-plan outputs without
+      checking file existence, so `cl.exe` fails at runtime.  Plain `build`
+      (no `-f`) handles this correctly via `GetDirtyCommandsByMtime` which
+      topo-sorts all commands and propagates dirtiness through
+      `dirtyOutputs`.
+- [ ] Include tree reconstruction — tlog data is flat (MSVC's file tracker
+      records every `CreateFile`, no nesting).  To reconstruct the actual
+      `#include` hierarchy would need `/showIncludes` (indented tree) or
+      `/sourceDependencies` (JSON, MSVC 16.7+) integration.  Both require
+      the flag to be enabled at build time.  Currently bt's `--headers`
+      shows the flat tlog set which is complete but unstructured.
 
 ## Robustness
 - [x] ~~Version-stamp the cache~~ — cache version field (int) auto-invalidates
