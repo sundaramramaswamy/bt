@@ -65,7 +65,7 @@ watchCmd.Add(watchDebounceOption);
 watchCmd.Add(watchRunOption);
 
 // -- Wire up --
-var root = new RootCommand("bt — MSBuild incremental build tool");
+var root = new RootCommand("bt — MSBuild/C++ incremental build tool");
 root.Add(binlogOption);
 root.Add(colorOption);
 root.Add(graphCmd);

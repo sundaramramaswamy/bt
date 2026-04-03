@@ -3,7 +3,7 @@
   <metadata>
     <id>Bt</id>
     <version>$version$</version>
-    <description>bt — MSBuild incremental build tool (NativeAOT)</description>
+    <description>bt — MSBuild/C++ incremental build tool (NativeAOT)</description>
     <authors>Sundaram Ramaswamy</authors>
   </metadata>
   <files>

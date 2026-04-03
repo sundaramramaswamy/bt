@@ -1,6 +1,6 @@
 # bt
 
-**MSBuild incremental build tool.**  
+**MSBuild/C++ incremental build tool.**
 Parses a binary log, builds a file-level dependency graph, and lets you query and rebuild from it.
 
 ```

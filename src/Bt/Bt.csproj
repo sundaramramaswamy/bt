@@ -10,7 +10,7 @@
     <AssemblyName>bt</AssemblyName>
     <PackageId>Bt</PackageId>
     <Version>1.0.0</Version>
-    <Description>MSBuild incremental build tool — query, build, and generate compile_commands.json from binlogs</Description>
+    <Description>MSBuild/C++ incremental build tool — query, build, and generate compile_commands.json from binlogs</Description>
   </PropertyGroup>
 
   <ItemGroup>

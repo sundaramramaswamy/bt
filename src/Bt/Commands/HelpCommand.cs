@@ -33,7 +33,7 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
 
     public string GetRootHelp() => $"""
 
-        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{versionShort}{Clr.Reset} — MSBuild incremental build tool
+        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{versionShort}{Clr.Reset} — MSBuild/C++ incremental build tool
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt [command] [options]
 
