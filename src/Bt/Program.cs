@@ -236,18 +236,23 @@ static BuildGraph LoadGraph(string binlogPath)
 
     // Try loading from cache
     BuildGraph graph;
+    BuildGraph? staleGraph = null;
     if (File.Exists(cachePath))
     {
         try
         {
             var cached = GraphCache.Load(cachePath);
-            if (cached is { } c && c.BinlogTimestamp == binlogStamp.Ticks)
+            if (cached is { } c)
             {
-                Console.Error.WriteLine($"{Clr.Dim}cache:{Clr.Reset} {cachePath}");
-                graph = c.Graph;
-                goto infer;
+                if (c.BinlogTimestamp == binlogStamp.Ticks)
+                {
+                    Console.Error.WriteLine($"{Clr.Dim}cache:{Clr.Reset} {cachePath}");
+                    graph = c.Graph;
+                    goto infer;
+                }
+                staleGraph = c.Graph;
+                Console.Error.WriteLine($"{Clr.Dim}cache stale, rebuilding{Clr.Reset}");
             }
-            Console.Error.WriteLine($"{Clr.Dim}cache stale, rebuilding{Clr.Reset}");
         }
         catch { Console.Error.WriteLine($"{Clr.Dim}cache corrupt, rebuilding{Clr.Reset}"); }
     }
@@ -258,6 +263,13 @@ static BuildGraph LoadGraph(string binlogPath)
         var build = BinaryLog.ReadBuild(binlogPath);
         if (!build.Succeeded)
         {
+            if (staleGraph != null)
+            {
+                Console.Error.WriteLine(
+                    $"{Clr.Yellow}warning:{Clr.Reset} binlog is from a failed build; using last good cache");
+                graph = staleGraph;
+                goto infer;
+            }
             Console.Error.WriteLine($"{Clr.Red}error:{Clr.Reset} binlog is from a failed build");
             if (build.FirstError is { } err)
                 Console.Error.WriteLine($"  {Clr.Red}{err.File}({err.LineNumber}): {err.Text}{Clr.Reset}");
