@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [4b4c6e4]
+
+### Fixed
+- **Failed binlog no longer blocks bt**: when a cached graph exists
+  but the latest binlog is from a failed build, bt warns and reuses
+  the last good cache instead of exiting.  Previously required a
+  successful `msbuild /bl` before bt would work again.
+
 ## [feb2e45]
 
 ### Added
