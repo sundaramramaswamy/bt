@@ -26,7 +26,7 @@ Execution speed of `bt` is of the essence, without sacrificing correctness for t
 - **Tlog enrichment**: `WireTlogHeaders()` reads `CL.read.1.tlog` from intermediate obj dirs to wire precise `#include` edges.  Falls back to conservative `ClInclude` when tlogs are missing.
 - **Build execution**: `BuildCommand` replays `cl.exe`/`link.exe` directly with per-project environment from binlog's `SetEnv` tasks.  Parallel wave execution.
 - **Source inference**: `SourceInference.InferNewSources()` runs after every graph load.  Compares each project file's mtime to the binlog's; stale projects are parsed (XML) for `<ClCompile>` items not in the graph.  For each new source, a CL command is synthesised by mirroring a same-project peer's command line (`BuildGraphFactory.SplitCommandLine`, promoted to `internal`), and the resulting `.obj` is injected into every LINK/LIB command of the project — both the `Inputs` list (graph edges) and the `CommandLine` string (executed verbatim by `BuildCommand`).  Follows `<Import>` links to `.vcxitems` shared-item files.  Per-file metadata triggers a warning; PCH-creating peers are skipped.
-- **Binlog validation**: `LoadGraph` checks `build.Succeeded` after `BinaryLog.ReadBuild()`.  A failed binlog produces an incomplete graph (e.g. LINK never ran) and is rejected with the first error message.  The check only runs on cache miss (fresh parse).
+- **Binlog validation**: `LoadGraph` checks `build.Succeeded` after `BinaryLog.ReadBuild()`.  A failed binlog produces an incomplete graph (e.g. LINK never ran).  If a stale cache exists, it is reused with a warning; otherwise the first error message is printed and bt exits.  The check only runs on cache miss (fresh parse).
 - **Watch**: `WatchCommand` uses `FileSystemWatcher` on the repo root.  It reloads the graph (cache + fresh inference) when `.vcxproj`/`.vcxitems` files change, not just source files.  Binlog changes also trigger a reload.
 - **Help**: `ColoredHelpAction` in `Commands/HelpCommand.cs` is the single entry point for all help rendering (`-?`, `/?`, `-h`, `--help`, `help`, no-args).  Wired via `HelpOption.Action` on the root command.
 
@@ -42,9 +42,9 @@ Execution speed of `bt` is of the essence, without sacrificing correctness for t
 
 ## NativeAOT / Publishing
 
-`bt` publishes as a NativeAOT binary (`PublishAot=true` in Bt.csproj).  `RuntimeIdentifier` is set to `$(NETCoreSdkRuntimeIdentifier)` so `dotnet build` auto-detects the host architecture (win-x64 or win-arm64).  The publish script's `-r` flag overrides this for cross-compilation.
+`bt` publishes as a NativeAOT binary (`PublishAot=true` in Bt.csproj).  The csproj has no `RuntimeIdentifier` — the SDK auto-detects the host architecture for dev builds.  `publish.ps1` passes `-r` to override for each target RID.
 
-`bt` publishes as a NativeAOT binary (`PublishAot=true` in Bt.csproj).
+**Cross-architecture publish**: NativeAOT cross-compilation (arm64→x64 or vice versa) requires the host-arch `runtime.win-{arch}.Microsoft.DotNet.ILCompiler` package.  `publish.ps1` handles this: it queries the ILCompiler version from the SDK's `KnownILCompilerPack`, ensures the host package is in the NuGet cache (via `nuget install` if missing), and passes `-p:IlcHostPackagePath=<path>` for cross-arch targets.  No version pinning in the csproj.
 
 **Critical**: StructuredLogger uses `Assembly.GetTypes()` + `Activator.CreateInstance()` in its `Serialization.ObjectModelTypes` static initializer to build a type registry for binlog deserialization.  NativeAOT's trimmer strips this reflection metadata, causing a silent `TypeInitializationException` -- the build tree loads as empty (0 tasks).  This is not an obvious failure: `BinaryLog.ReadBuild()` succeeds but the `Build` object has only error/property children.
 
