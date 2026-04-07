@@ -26,6 +26,7 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
             "compiledb" => CompileDbHelp(),
             "cache" => CacheHelp(),
             "watch" => WatchHelp(),
+            "update" => UpdateHelp(),
             _ => GetRootHelp()
         });
         return 0;
@@ -46,6 +47,7 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
           {Clr.Cyan}compiledb{Clr.Reset}          Generate compile_commands.json (-o path)
           {Clr.Cyan}cache{Clr.Reset}              Parse binlog and cache dependency graph
           {Clr.Cyan}watch{Clr.Reset}              Watch sources and rebuild on change
+          {Clr.Cyan}update{Clr.Reset}             Check for and install updates
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>    Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
@@ -216,5 +218,23 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
           {Clr.Dim}bt watch{Clr.Reset}
           {Clr.Dim}bt watch --run "test.exe"{Clr.Reset}
           {Clr.Dim}bt watch --debounce 500{Clr.Reset}
+        """;
+
+    static string UpdateHelp() => $"""
+
+        {Clr.Bold}bt update{Clr.Reset} — Check for and install updates from GitHub
+
+        {Clr.Yellow}Usage:{Clr.Reset}  bt update [options]
+
+        {Clr.Yellow}Options:{Clr.Reset}
+          {Clr.Green}-c, --check{Clr.Reset}      Check only — don't download or install
+          {Clr.Green}--color{Clr.Reset}  <mode>  auto | always | never {Clr.Dim}[default: auto]{Clr.Reset}
+
+        {Clr.Yellow}Environment:{Clr.Reset}
+          {Clr.Green}GITHUB_TOKEN{Clr.Reset}    Optional — used for authentication if set
+
+        {Clr.Yellow}Examples:{Clr.Reset}
+          {Clr.Dim}bt update{Clr.Reset}
+          {Clr.Dim}bt update --check{Clr.Reset}
         """;
 }

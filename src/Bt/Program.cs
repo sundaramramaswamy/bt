@@ -4,6 +4,9 @@ using Microsoft.Build.Logging.StructuredLogger;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+// Clean up leftover from a previous update
+UpdateCommand.CleanupOldBinary();
+
 // -- Global options (Recursive = visible on all subcommands) --
 var binlogOption = new Option<string>("--binlog") { Description = "Path to .binlog file", Recursive = true };
 binlogOption.DefaultValueFactory = _ => "msbuild.binlog";
@@ -64,6 +67,11 @@ var watchCmd = new Command("watch", "Watch sources and rebuild on change");
 watchCmd.Add(watchDebounceOption);
 watchCmd.Add(watchRunOption);
 
+var updateCheckOption = new Option<bool>("--check") { Description = "Check for updates without installing" };
+updateCheckOption.Aliases.Add("-c");
+var updateCmd = new Command("update", "Check for and install updates from GitHub");
+updateCmd.Add(updateCheckOption);
+
 // -- Wire up --
 var root = new RootCommand("bt — MSBuild/C++ incremental build tool");
 root.Add(binlogOption);
@@ -76,6 +84,7 @@ root.Add(buildCmd);
 root.Add(compileCommandsCmd);
 root.Add(cacheCmd);
 root.Add(watchCmd);
+root.Add(updateCmd);
 
 // Resolve version string for help banner
 var btVersion = "unknown";
@@ -187,6 +196,13 @@ watchCmd.SetAction(result =>
     var debounceMs = result.GetValue(watchDebounceOption);
     var runCmd = result.GetValue(watchRunOption);
     return WatchCommand.RunWatch(g, Path.GetFullPath(binlog), debounceMs, LoadGraph, runCmd);
+});
+
+updateCmd.SetAction(result =>
+{
+    Clr.SetMode(result.GetValue(colorOption) ?? "auto");
+    var checkOnly = result.GetValue(updateCheckOption);
+    return UpdateCommand.RunUpdate(btVersionShort, checkOnly);
 });
 
 var parseResult = root.Parse(args);
