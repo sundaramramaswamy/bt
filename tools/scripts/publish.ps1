@@ -5,8 +5,10 @@
 # feed.config is gitignored — no corp URLs in the repo.
 #
 # By default builds win-x64 and win-arm64. Pass -RID to build only one.
+# Pass -PackOnly to build and pack without publishing to feed or GitHub.
 param(
-    [string[]]$RID = @('win-x64', 'win-arm64')
+    [string[]]$RID = @('win-x64', 'win-arm64'),
+    [switch]$PackOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,26 +27,29 @@ if ($needsCross -and -not (Get-Command nuget -ErrorAction SilentlyContinue)) {
 }
 
 try {
-    # --- Feed config ---
-    $configPath = Join-Path $root 'tools\scripts\feed.config'
-    if (-not (Test-Path $configPath)) {
-        Write-Host "No feed configured. Let's set one up." -ForegroundColor Yellow
-        $name = Read-Host "Feed name (e.g. my-tools)"
-        $url  = Read-Host "Feed URL  (e.g. https://pkgs.dev.azure.com/org/project/_packaging/feed/nuget/v3/index.json)"
-        @{ Name = $name; Url = $url } | ConvertTo-Json | Set-Content $configPath
-        Write-Host "Saved to $configPath (gitignored)" -ForegroundColor Green
-    }
+    # --- Feed config (skip in pack-only mode) ---
+    $feedName = $null
+    if (-not $PackOnly) {
+        $configPath = Join-Path $root 'tools\scripts\feed.config'
+        if (-not (Test-Path $configPath)) {
+            Write-Host "No feed configured. Let's set one up." -ForegroundColor Yellow
+            $name = Read-Host "Feed name (e.g. my-tools)"
+            $url  = Read-Host "Feed URL  (e.g. https://pkgs.dev.azure.com/org/project/_packaging/feed/nuget/v3/index.json)"
+            @{ Name = $name; Url = $url } | ConvertTo-Json | Set-Content $configPath
+            Write-Host "Saved to $configPath (gitignored)" -ForegroundColor Green
+        }
 
-    $config = Get-Content $configPath | ConvertFrom-Json
-    $feedName = $config.Name
-    $feedUrl  = $config.Url
+        $config = Get-Content $configPath | ConvertFrom-Json
+        $feedName = $config.Name
+        $feedUrl  = $config.Url
 
-    # Ensure feed is registered
-    $sources = dotnet nuget list source 2>&1 | Out-String
-    $namePattern = "\b$([regex]::Escape($feedName))\b"
-    if ($sources -notmatch [regex]::Escape($feedUrl) -and $sources -notmatch $namePattern) {
-        Write-Host "Adding NuGet source '$feedName' ..." -ForegroundColor Yellow
-        dotnet nuget add source $feedUrl --name $feedName
+        # Ensure feed is registered
+        $sources = dotnet nuget list source 2>&1 | Out-String
+        $namePattern = "\b$([regex]::Escape($feedName))\b"
+        if ($sources -notmatch [regex]::Escape($feedUrl) -and $sources -notmatch $namePattern) {
+            Write-Host "Adding NuGet source '$feedName' ..." -ForegroundColor Yellow
+            dotnet nuget add source $feedUrl --name $feedName
+        }
     }
 
     # --- Version from git ---
@@ -71,20 +76,20 @@ try {
     $staging = Join-Path $root 'staging'
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 
-    foreach ($rid in $RID) {
-        Write-Host "Publishing $rid ..." -ForegroundColor Cyan
-        $out = Join-Path $staging $rid
-        $targetArch = $rid.Split('-')[1]
+    foreach ($r in $RID) {
+        Write-Host "Publishing $r ..." -ForegroundColor Cyan
+        $out = Join-Path $staging $r
+        $targetArch = $r.Split('-')[1]
         # Clean intermediate state from prior RID
         $objDir = Join-Path $root 'src\Bt\obj'
         if (Test-Path $objDir) { Remove-Item $objDir -Recurse -Force }
         $publishArgs = @(
-            'publish', 'src\Bt', '-c', 'Release', '-r', $rid, '-o', $out,
+            'publish', 'src\Bt', '-c', 'Release', '-r', $r, '-o', $out,
             "-p:Version=$version", "-p:PlatformTarget=$targetArch",
             "-p:IlcHostPackagePath=$hostPkgPath"
         )
         dotnet @publishArgs
-        if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $rid" }
+        if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $r" }
         Write-Host "  $out\bt.exe" -ForegroundColor Green
     }
 
@@ -102,16 +107,47 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed" }
     $pkg = Join-Path $staging "Bt.$version.nupkg"
 
+    # --- Zip per-RID binaries (after pack to avoid cleanup) ---
+    foreach ($r in $RID) {
+        $zip = Join-Path $staging "bt-$r.zip"
+        Compress-Archive -Path (Join-Path $staging "$r\bt.exe") -DestinationPath $zip
+    }
+
     Write-Host "Pushing $pkg ..." -ForegroundColor Cyan
+    if ($PackOnly) {
+        Write-Host "Pack-only mode — skipping feed push and GitHub release" -ForegroundColor Yellow
+        Write-Host "`nPacked Bt $version ($($RID -join ', '))" -ForegroundColor Green
+        Write-Host "Artifacts: $staging" -ForegroundColor DarkGray
+        return
+    }
     dotnet nuget push $pkg --source $feedName --api-key az
     if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed" }
+
+    # --- GitHub release ---
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        Write-Host "Creating GitHub release $version ..." -ForegroundColor Cyan
+        $assets = $RID | ForEach-Object { Join-Path $staging "bt-$_.zip" }
+        # Extract latest CHANGELOG section as release notes
+        $cl = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw
+        $m = [regex]::Match($cl, '(?ms)^## \[.+?\]\s*\n(.*?)(?=^## \[|\z)')
+        $notes = if ($m.Success) { $m.Groups[1].Value.Trim() } else { '' }
+        $tag = "v$version"
+        $releaseArgs = @('release', 'create', $tag) + $assets + @('--title', $tag, '--prerelease')
+        if ($notes) { $releaseArgs += @('--notes', $notes) }
+        gh @releaseArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "GitHub release failed (feed push succeeded)" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "gh CLI not found, skipping GitHub release" -ForegroundColor Yellow
+    }
 
     Write-Host "`nPublished Bt $version ($($RID -join ', '))" -ForegroundColor Green
     Write-Host "Install:  nuget install Bt -Version $version -Source $feedName -OutputDirectory ~\tools" -ForegroundColor DarkGray
 }
 finally {
     Pop-Location
-    if (Test-Path (Join-Path $root 'staging')) {
+    if (-not $PackOnly -and (Test-Path (Join-Path $root 'staging'))) {
         Remove-Item (Join-Path $root 'staging') -Recurse -Force
     }
 }
