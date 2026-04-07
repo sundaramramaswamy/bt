@@ -21,8 +21,14 @@
       mtime on child content writes (only on create/delete/rename), so the
       dir-mtime invalidation strategy would miss edits.  Parallel stat is the
       correct approach.
+- [ ] Cache project file mtimes alongside the binlog timestamp so inference
+      is skipped on cache-hit paths entirely (currently re-runs on every
+      invocation, but costs only N mtime stats normally).
 
 ## Features
+- [ ] `update --pre` — include pre-release versions in update check.
+      Currently all releases are CI pre-releases (`1.0.0-ci.*`), so the
+      flag is meaningless until stable releases exist.
 - [ ] `build --profile` — report per-command wall-clock time to identify build
       bottlenecks
 - [ ] `build -f` prereq-missing warning — `build -f Tracing.cpp` assumes
@@ -72,8 +78,3 @@
   (1) new `.h` included by an existing `.cpp` — dirty on source mtime the
   first time, but future `.h`-only edits won't propagate until next full build;
   (2/3) new `.h` and `.cpp` added together — same gap after the first `bt build`.
-
-## Optimization
-- [ ] Cache project file mtimes alongside the binlog timestamp so inference
-      is skipped on cache-hit paths entirely (currently re-runs on every
-      invocation, but costs only N mtime stats normally).

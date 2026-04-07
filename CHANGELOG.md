@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [9279fe5]
+
+### Added
+- `bt update` — self-update from GitHub Releases.  Checks the latest
+  release, compares commit counts, downloads the matching architecture
+  zip (win-x64 / win-arm64), and swaps the running binary in-place.
+  `--check` flag for version check without downloading.  Respects
+  `GITHUB_TOKEN` for private repos / rate limiting.
+
 ## [4b4c6e4]
 
 ### Fixed

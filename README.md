@@ -55,6 +55,7 @@ binlog parsing unless the binlog changes.
 | `dirty [files]` | Topo-sorted build plan (default: mtime-based; explicit files override) |
 | `build [files]` | Execute dirty commands in parallel waves (`-j N`, `--dry-run`) |
 | `watch` | Watch sources and rebuild on change (`--debounce`, `--run <cmd>`) |
+| `update` | Check for and install updates from GitHub (`--check` for dry run) |
 | `compiledb` | Generate `compile_commands.json` for clangd / clang-tidy |
 | `cache` | Parse binlog and cache dependency graph |
 | `graph` | Emit Graphviz DOT graph (pipe to `dot`, `d2`, etc.) |

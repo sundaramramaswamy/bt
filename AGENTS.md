@@ -29,6 +29,7 @@ Execution speed of `bt` is of the essence, without sacrificing correctness for t
 - **Binlog validation**: `LoadGraph` checks `build.Succeeded` after `BinaryLog.ReadBuild()`.  A failed binlog produces an incomplete graph (e.g. LINK never ran).  If a stale cache exists, it is reused with a warning; otherwise the first error message is printed and bt exits.  The check only runs on cache miss (fresh parse).
 - **Watch**: `WatchCommand` uses `FileSystemWatcher` on the repo root.  It reloads the graph (cache + fresh inference) when `.vcxproj`/`.vcxitems` files change, not just source files.  Binlog changes also trigger a reload.
 - **Help**: `ColoredHelpAction` in `Commands/HelpCommand.cs` is the single entry point for all help rendering (`-?`, `/?`, `-h`, `--help`, `help`, no-args).  Wired via `HelpOption.Action` on the root command.
+- **Self-update**: `UpdateCommand` fetches the latest GitHub release via `HttpClient` (BCL, NativeAOT-safe), compares commit counts from the `1.0.0-ci.<count>.<hash>` version string, downloads the architecture-matched zip, and swaps the running binary via NTFS rename (`File.Move` on a running exe changes the directory entry without touching the memory mapping).  Standalone — no graph, cache, or binlog involvement.  Old binary (`.old`) cleaned up on next startup.
 
 ## Key design decisions
 
