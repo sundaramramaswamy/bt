@@ -13,6 +13,17 @@ $ErrorActionPreference = 'Stop'
 $root = git rev-parse --show-toplevel
 Push-Location $root
 
+# --- Preflight: check for cross-compile prerequisites ---
+$hostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+$needsCross = $RID | Where-Object { $_.Split('-')[1] -ne $hostArch }
+if ($needsCross -and -not (Get-Command nuget -ErrorAction SilentlyContinue)) {
+    $hostPkg = "runtime.win-$hostArch.microsoft.dotnet.ilcompiler"
+    $hostPkgDir = Join-Path $env:USERPROFILE ".nuget\packages\$hostPkg"
+    if (-not (Test-Path $hostPkgDir)) {
+        throw "Cross-compile needs nuget.exe in PATH (winget install Microsoft.NuGet)"
+    }
+}
+
 try {
     # --- Feed config ---
     $configPath = Join-Path $root 'tools\scripts\feed.config'
@@ -41,6 +52,21 @@ try {
     $hash = git rev-parse --short HEAD
     $version = "1.0.0-ci.$count.$hash"
 
+    # --- Cross-compile setup ---
+    # $hostArch already set in preflight
+    $json = dotnet msbuild src\Bt\Bt.csproj -getItem:KnownILCompilerPack 2>$null | ConvertFrom-Json
+    $ilcVersion = ($json.Items.KnownILCompilerPack |
+        Where-Object { $_.TargetFramework -eq 'net8.0' }).ILCompilerPackVersion
+    $hostPkg = "runtime.win-$hostArch.microsoft.dotnet.ilcompiler"
+    $hostPkgPath = Join-Path $env:USERPROFILE ".nuget\packages\$hostPkg\$ilcVersion"
+
+    if (-not (Test-Path $hostPkgPath)) {
+        Write-Host "Downloading $hostPkg $ilcVersion ..." -ForegroundColor Yellow
+        nuget install $hostPkg -Version $ilcVersion -OutputDirectory (
+            Join-Path $env:USERPROFILE '.nuget\packages') -NonInteractive
+        if ($LASTEXITCODE -ne 0) { throw "nuget install $hostPkg failed" }
+    }
+
     # --- Publish NativeAOT for each RID ---
     $staging = Join-Path $root 'staging'
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
@@ -48,7 +74,16 @@ try {
     foreach ($rid in $RID) {
         Write-Host "Publishing $rid ..." -ForegroundColor Cyan
         $out = Join-Path $staging $rid
-        dotnet publish src\Bt -c Release -r $rid -o $out -p:Version=$version
+        $targetArch = $rid.Split('-')[1]
+        # Clean intermediate state from prior RID
+        $objDir = Join-Path $root 'src\Bt\obj'
+        if (Test-Path $objDir) { Remove-Item $objDir -Recurse -Force }
+        $publishArgs = @(
+            'publish', 'src\Bt', '-c', 'Release', '-r', $rid, '-o', $out,
+            "-p:Version=$version", "-p:PlatformTarget=$targetArch",
+            "-p:IlcHostPackagePath=$hostPkgPath"
+        )
+        dotnet @publishArgs
         if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $rid" }
         Write-Host "  $out\bt.exe" -ForegroundColor Green
     }
