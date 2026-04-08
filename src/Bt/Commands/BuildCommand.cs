@@ -147,7 +147,7 @@ static class BuildCommand
             Parallel.ForEach(wave, new ParallelOptions { MaxDegreeOfParallelism = maxJobs }, cmd =>
             {
                 WriteStatus(cmd.Tool, cmd.Outputs.Count > 0 ? cmd.Outputs[0] : cmd.Id, done: false);
-                var (exitCode, output) = ExecuteCommand(cmd, g, envByProject.GetValueOrDefault(cmd.Project));
+                var (exitCode, output) = ExecuteCommand(cmd, g, g.GlobalEnv, envByProject.GetValueOrDefault(cmd.Project));
                 Interlocked.Increment(ref completed);
                 results.Add((cmd, exitCode, output));
                 WriteStatus(cmd.Tool, cmd.Outputs.Count > 0 ? cmd.Outputs[0] : cmd.Id, done: true, failed: exitCode != 0);
@@ -217,7 +217,7 @@ static class BuildCommand
         return failures > 0 ? BuildResult.Failed : BuildResult.Succeeded;
     }
 
-    public static (int exitCode, string output) ExecuteCommand(CommandNode cmd, BuildGraph graph, Dictionary<string, string>? env = null)
+    public static (int exitCode, string output) ExecuteCommand(CommandNode cmd, BuildGraph graph, Dictionary<string, string>? globalEnv = null, Dictionary<string, string>? projectEnv = null)
     {
         if (cmd.Tool == "Copy" && cmd.Inputs.Count > 0 && cmd.Outputs.Count > 0)
             return ExecuteCopy(cmd, graph);
@@ -257,9 +257,13 @@ static class BuildCommand
             UseShellExecute = false,
         };
 
-        // Apply per-project environment from binlog SetEnv tasks
-        if (env is { Count: > 0 })
-            foreach (var (k, v) in env)
+        // Apply environment from binlog: global env first (base), then
+        // per-project SetEnv overlay (PATH, INCLUDE, LIB, etc.).
+        if (globalEnv is { Count: > 0 })
+            foreach (var (k, v) in globalEnv)
+                psi.Environment[k] = v;
+        if (projectEnv is { Count: > 0 })
+            foreach (var (k, v) in projectEnv)
                 psi.Environment[k] = v;
 
         try
