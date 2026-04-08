@@ -55,6 +55,24 @@ static class BuildGraphFactory
             }
         }
 
+        // Extract global environment variables from the Build-level Environment
+        // folder.  These are vars MSBuild inherited from the shell (TEMP, TMP,
+        // VCToolsInstallDir, etc.) that CL/LINK need but SetEnv doesn't set.
+        var envFolderNode = FindChildFolder(build.Children, "Environment");
+        if (envFolderNode != null)
+        {
+            foreach (var child in envFolderNode.Children)
+            {
+                if (child is not Property prop) continue;
+                var n = prop.Name;
+                if (string.IsNullOrEmpty(n)) continue;
+                // Skip MSBuild-internal vars that shouldn't leak to child processes
+                if (n.StartsWith("MSBUILD", StringComparison.OrdinalIgnoreCase)) continue;
+                if (n.StartsWith("MSBuild", StringComparison.Ordinal)) continue;
+                graph.GlobalEnv[n] = prop.Value ?? "";
+            }
+        }
+
         // Track CL command IDs per project so we can wire headers to them later.
         var clCmdsByProject = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         // Track CL command by absolute source path (for tlog matching — tlogs use absolute uppercase paths).

@@ -15,6 +15,11 @@ class BuildGraph
     /// are SDK/generated headers — excluded from mtime dirty checking.
     public HashSet<string> ExternalPrefixes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// Global environment variables from the binlog's Environment folder.
+    /// These are the MSBuild process env vars (TEMP, VCToolsInstallDir, etc.)
+    /// that CL/LINK inherit but SetEnv doesn't explicitly set.
+    public Dictionary<string, string> GlobalEnv { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// Per-project environment variables extracted from SetEnv tasks in the binlog.
     /// Key: project file name (e.g. "XaBench.vcxproj"), Value: env var name → value.
     public Dictionary<string, Dictionary<string, string>> ProjectEnv { get; init; } = new(StringComparer.OrdinalIgnoreCase);
