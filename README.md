@@ -112,7 +112,7 @@ bt graph -p XaBench -f main.cpp       # combine (AND)
 
 4. **Query** — `bins`/`srcs` walk the graph forward/backward, printing a tree. `dirty` computes a topo-sorted build plan using file timestamps (like `make`/`ninja`). `graph` emits DOT for visualization.
 
-5. **Build** — `build` executes dirty commands in parallel, invoking `cl.exe`, `link.exe`, etc. directly — no MSBuild overhead. Environment variables (`INCLUDE`, `LIB`, `PATH`, etc.) are captured from the binlog's `SetEnv` tasks and replayed per-project.
+5. **Build** — `build` executes dirty commands in parallel, invoking `cl.exe`, `link.exe`, etc. directly — no MSBuild overhead. Environment variables are reconstructed from the binlog: global process env (TEMP, VCToolsInstallDir, etc.) as a base layer, then per-project `SetEnv` overrides (`INCLUDE`, `LIB`, `PATH`, etc.) on top.
 
 6. **Inference** — On every run, `bt` compares each project file's mtime against the binlog's. If a `.vcxproj` (or imported `.vcxitems`) is newer, `bt` parses it for `<ClCompile>` sources not yet in the graph and synthesises compile/link commands by mirroring flags from a peer source in the same project. This lets you add a `.cpp` to a project and immediately `bt build` — no full MSBuild run required. A warning is emitted if the new source has per-file metadata (optimization overrides etc.); in that case the peer's flags are used and a full rebuild is recommended for exact flags.
 
@@ -169,6 +169,11 @@ On first run, `publish.ps1` prompts for feed name and URL, saved to
 - **Inference does not follow `.props`/`.targets` imports.** Sources added
   via imported property sheets require MSBuild evaluation to enumerate.
   Add such files directly to the `.vcxproj`, or do a full rebuild first.
+
+- **Env var coverage depends on the binlog.** MSBuild 17.4+ only logs
+  env vars it actually reads during the build.  If a tool needs a var
+  that MSBuild didn't read, set `MSBUILDLOGALLENVIRONMENTVARIABLES=1`
+  when generating the binlog: `set MSBUILDLOGALLENVIRONMENTVARIABLES=1 && msbuild -bl`.
 
 ## Requirements
 

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [d30ccc4]
+
+### Fixed
+- **`bt build` on a fresh CMD hangs at LINK**: only 6 per-project
+  SetEnv vars were replayed; global env vars (TEMP, VCToolsInstallDir,
+  etc.) from the MSBuild process were missing.  Now extracts the full
+  environment from the binlog's Environment folder.
+
 ## [9279fe5]
 
 ### Added
@@ -246,3 +254,4 @@ Versions are identified by commit hash (short).
 |:---:|:---:|---|
 | 1 | d28fcd1 | Initial FlatBuffers schema |
 | 2 | bd14db9 | Skip CreateWinMD; project on `#include` commands |
+| 3 | 34f6cdb | Global env from binlog Environment folder |
