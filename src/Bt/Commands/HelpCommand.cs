@@ -33,8 +33,13 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
     }
 
     public string GetRootHelp() => $"""
+        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{versionShort}{Clr.Reset}
+        Sundaram Ramaswamy <legends2k@yahoo.com>
+        {Clr.Dim}https://github.com/sundaramramaswamy/bt{Clr.Reset}
 
-        {Clr.Bold}bt{Clr.Reset} {Clr.Dim}{versionShort}{Clr.Reset} — MSBuild/C++ incremental build tool
+        Fast incremental builds for MSBuild/C++ projects.
+        Reads a binlog, builds an exact dependency graph, and replays
+        only the dirty steps — compile, link, MIDL, XAML, resources.
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt [command] [options]
 
@@ -80,7 +85,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string GraphHelp() => $"""
-
         {Clr.Bold}bt graph{Clr.Reset} — Emit Graphviz DOT dependency graph
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt graph [options]
@@ -100,7 +104,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string BinsHelp() => $"""
-
         {Clr.Bold}bt bins{Clr.Reset} — Downstream dependency tree from <file>
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt bins <files>
@@ -117,7 +120,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string SrcsHelp() => $"""
-
         {Clr.Bold}bt srcs{Clr.Reset} — Upstream dependency tree for <file>
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt srcs [options] <files>
@@ -136,7 +138,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string DirtyHelp() => $"""
-
         {Clr.Bold}bt dirty{Clr.Reset} — Build plan for changed files
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt dirty [files]
@@ -154,7 +155,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string BuildHelp() => $"""
-
         {Clr.Bold}bt build{Clr.Reset} — Build only what's dirty
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt build [files] [options]
@@ -177,7 +177,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string CompileDbHelp() => $"""
-
         {Clr.Bold}bt compiledb{Clr.Reset} — Generate compile_commands.json for clangd/clang-tidy
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt compiledb [options]
@@ -192,7 +191,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string CacheHelp() => $"""
-
         {Clr.Bold}bt cache{Clr.Reset} — Parse binlog and cache dependency graph
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt cache [options]
@@ -203,7 +201,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string WatchHelp() => $"""
-
         {Clr.Bold}bt watch{Clr.Reset} — Watch sources and rebuild on change
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt watch [options]
@@ -221,7 +218,6 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string UpdateHelp() => $"""
-
         {Clr.Bold}bt update{Clr.Reset} — Check for and install updates from GitHub
 
         {Clr.Yellow}Usage:{Clr.Reset}  bt update [options]
