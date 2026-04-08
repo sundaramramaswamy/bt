@@ -6,6 +6,8 @@
 #
 # By default builds win-x64 and win-arm64. Pass -RID to build only one.
 # Pass -PackOnly to build and pack without publishing to feed or GitHub.
+# Set GITHUB_TOKEN env var to create a GitHub release with zip assets.
+# Falls back to Git Credential Manager when GITHUB_TOKEN is unset.
 param(
     [string[]]$RID = @('win-x64', 'win-arm64'),
     [switch]$PackOnly
@@ -123,23 +125,58 @@ try {
     dotnet nuget push $pkg --source $feedName --api-key az
     if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed" }
 
-    # --- GitHub release ---
-    if (Get-Command gh -ErrorAction SilentlyContinue) {
+    # --- GitHub release (via REST API, no gh CLI needed) ---
+    $ghToken = $env:GITHUB_TOKEN
+    if (-not $ghToken) {
+        # Fall back to Git Credential Manager (same store git push uses)
+        $credOutput = "protocol=https`nhost=github.com" | git credential fill 2>$null
+        $ghToken = ($credOutput | Select-String '^password=(.+)$').Matches |
+            ForEach-Object { $_.Groups[1].Value }
+    }
+    if (-not $ghToken) {
+        Write-Host "No GitHub token (set GITHUB_TOKEN or configure git credential manager)" -ForegroundColor Yellow
+    } else {
         Write-Host "Creating GitHub release $version ..." -ForegroundColor Cyan
-        $assets = $RID | ForEach-Object { Join-Path $staging "bt-$_.zip" }
+        $tag = "v$version"
         # Extract latest CHANGELOG section as release notes
         $cl = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw
         $m = [regex]::Match($cl, '(?ms)^## \[.+?\]\s*\n(.*?)(?=^## \[|\z)')
         $notes = if ($m.Success) { $m.Groups[1].Value.Trim() } else { '' }
-        $tag = "v$version"
-        $releaseArgs = @('release', 'create', $tag) + $assets + @('--title', $tag, '--prerelease')
-        if ($notes) { $releaseArgs += @('--notes', $notes) }
-        gh @releaseArgs
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "GitHub release failed (feed push succeeded)" -ForegroundColor Yellow
+
+        $headers = @{
+            Authorization = "Bearer $ghToken"
+            Accept        = 'application/vnd.github+json'
         }
-    } else {
-        Write-Host "gh CLI not found, skipping GitHub release" -ForegroundColor Yellow
+        $owner = 'sundaramramaswamy'
+        $repo  = 'bt'
+        $body  = @{
+            tag_name   = $tag
+            name       = $tag
+            body       = $notes
+            prerelease = $true
+        } | ConvertTo-Json
+
+        try {
+            $release = Invoke-RestMethod `
+                -Uri "https://api.github.com/repos/$owner/$repo/releases" `
+                -Method Post -Headers $headers -Body $body `
+                -ContentType 'application/json'
+
+            # Upload per-RID zip assets
+            $uploadBase = $release.upload_url -replace '\{.*\}', ''
+            foreach ($r in $RID) {
+                $zip = Join-Path $staging "bt-$r.zip"
+                $name = "bt-$r.zip"
+                Invoke-RestMethod `
+                    -Uri "${uploadBase}?name=$name" `
+                    -Method Post -Headers $headers `
+                    -ContentType 'application/zip' `
+                    -InFile $zip | Out-Null
+            }
+        } catch {
+            Write-Host "GitHub release failed: $_" -ForegroundColor Yellow
+            Write-Host "  (feed push succeeded)" -ForegroundColor Yellow
+        }
     }
 
     Write-Host "`nPublished Bt $version ($($RID -join ', '))" -ForegroundColor Green
