@@ -81,6 +81,8 @@ static class UpdateCommand
         using var doc = JsonDocument.Parse(json);
         var tag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
         var releaseVersion = tag.StartsWith('v') ? tag[1..] : tag;
+        var releaseNotes = doc.RootElement.TryGetProperty("body", out var bodyProp)
+            ? bodyProp.GetString() ?? "" : "";
 
         if (!TryParseCount(releaseVersion, out var latestCount))
         {
@@ -210,6 +212,12 @@ static class UpdateCommand
         Console.Error.WriteLine(
             $"{Clr.Green}updated{Clr.Reset}  " +
             $"{Clr.Dim}{currentVersion}{Clr.Reset} → {Clr.Green}{releaseVersion}{Clr.Reset}");
+        if (!string.IsNullOrWhiteSpace(releaseNotes))
+        {
+            Console.Error.WriteLine();
+            foreach (var line in releaseNotes.Split('\n'))
+                Console.Error.WriteLine($"  {Clr.Dim}{line.TrimEnd()}{Clr.Reset}");
+        }
         return 0;
     }
 
