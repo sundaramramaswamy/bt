@@ -5,7 +5,7 @@ using FlatSharp;
 /// Uses a sorted string table with integer indices for compact storage.
 static class GraphCache
 {
-    const int CacheVersion = 2;
+    const int CacheVersion = 3;
     static readonly ISerializer<GraphFb> Serializer = GraphFb.Serializer;
 
     public static void Save(string path, BuildGraph graph, DateTime binlogStamp)
@@ -32,6 +32,7 @@ static class GraphCache
             stringSet.Add(proj);
             foreach (var (k, v) in envMap) { stringSet.Add(k); stringSet.Add(v); }
         }
+        foreach (var (k, v) in graph.GlobalEnv) { stringSet.Add(k); stringSet.Add(v); }
 
         var strings = new string[stringSet.Count];
         stringSet.CopyTo(strings);
@@ -96,6 +97,8 @@ static class GraphCache
             Commands = fbCommands,
             ExternalPrefixIndices = extPfxIndices,
             ProjectEnvs = fbEnvs,
+            GlobalEnvNameIndices = BuildEnvIndices(graph.GlobalEnv, indexOf, name: true),
+            GlobalEnvValueIndices = BuildEnvIndices(graph.GlobalEnv, indexOf, name: false),
         };
 
         int maxSize = Serializer.GetMaxSize(fb);
@@ -196,6 +199,21 @@ static class GraphCache
                 graph.ProjectEnv[proj] = envMap;
             }
 
+        // Rebuild GlobalEnv
+        if (fb.GlobalEnvNameIndices is { } gNames && fb.GlobalEnvValueIndices is { } gValues
+            && gNames.Count == gValues.Count)
+            for (int i = 0; i < gNames.Count; i++)
+                graph.GlobalEnv[strings[gNames[i]]] = strings[gValues[i]];
+
         return (fb.BinlogTimestamp, graph);
+    }
+
+    static int[] BuildEnvIndices(Dictionary<string, string> env, Dictionary<string, int> indexOf, bool name)
+    {
+        var indices = new int[env.Count];
+        int i = 0;
+        foreach (var (k, v) in env)
+            indices[i++] = indexOf[name ? k : v];
+        return indices;
     }
 }
