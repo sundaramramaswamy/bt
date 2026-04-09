@@ -179,3 +179,11 @@ On first run, `publish.ps1` prompts for feed name and URL, saved to
 
 - .NET 8+ SDK (build-time only; published binary is a native executable)
 - A binary log from a full solution build (`msbuild -bl`)
+
+## Telemetry
+
+`bt` collects anonymous usage data (command name, flags, version,
+success/failure).  No file paths, repo names, or code are sent.
+See [PRIVACY.md](PRIVACY.md) for details.
+
+To disable: `set BT_NO_TELEMETRY=1`
