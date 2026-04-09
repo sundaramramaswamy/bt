@@ -82,6 +82,9 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
           {Clr.Dim}bt build --dry-run{Clr.Reset}
           {Clr.Dim}bt build -c src/Foo.cpp{Clr.Reset}
           {Clr.Dim}bt compiledb{Clr.Reset}
+
+        {Clr.Dim}Telemetry: anonymous usage data is collected. See PRIVACY.md.{Clr.Reset}
+        {Clr.Dim}Opt out: set BT_NO_TELEMETRY=1{Clr.Reset}
         """;
 
     static string GraphHelp() => $"""

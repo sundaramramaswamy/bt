@@ -2,10 +2,14 @@ using System.Diagnostics;
 
 /// Fire-and-forget telemetry to Azure Application Insights.
 /// Spawns a detached curl.exe process to POST — zero latency on the parent.
+/// Set BT_NO_TELEMETRY=1 to disable.
 static class Telemetry
 {
     const string IKey = "89e7fce8-3a1a-442e-b5c7-eca51539d9f5";
     const string Endpoint = "https://westus3-1.in.applicationinsights.azure.com/v2/track";
+
+    static readonly bool Disabled =
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("BT_NO_TELEMETRY"));
 
     /// Set once at startup from Program.cs.
     public static string Version { get; set; } = "unknown";
@@ -14,6 +18,7 @@ static class Telemetry
     /// Returns immediately (~2ms for Process.Start).
     public static void LogCommand(string command, bool ok, string flags = "", int count = 1)
     {
+        if (Disabled) return;
         try
         {
             var time = DateTime.UtcNow.ToString("O");
