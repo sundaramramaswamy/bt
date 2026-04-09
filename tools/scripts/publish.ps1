@@ -6,12 +6,14 @@
 #
 # By default builds win-x64 and win-arm64. Pass -RID to build only one.
 # Pass -PackOnly to build and pack without publishing to feed or GitHub.
+# Pass -SkipFeed to skip NuGet feed push (build + GitHub release only).
 # Pass -Commit to checkout and build a specific commit (requires clean tree).
 # Set GITHUB_TOKEN env var to create a GitHub release with zip assets.
 # Falls back to Git Credential Manager when GITHUB_TOKEN is unset.
 param(
     [string[]]$RID = @('win-x64', 'win-arm64'),
     [switch]$PackOnly,
+    [switch]$SkipFeed,
     [string]$Commit
 )
 
@@ -22,10 +24,12 @@ Push-Location $root
 # --- Checkout specific commit if requested ---
 $originalRef = $null
 if ($Commit) {
-    $dirty = git status --porcelain
-    if ($dirty) {
-        Write-Host "Working tree is not clean — commit or stash changes first." -ForegroundColor Red
-        $dirty | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    $dirty = git diff --name-only HEAD
+    $staged = git diff --name-only --cached
+    if ($dirty -or $staged) {
+        Write-Host "Tracked files have uncommitted changes — commit or stash first." -ForegroundColor Red
+        @($dirty) + @($staged) | Sort-Object -Unique |
+            ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
         exit 1
     }
     $resolved = git rev-parse --verify "$Commit^{commit}" 2>$null
@@ -37,6 +41,16 @@ if ($Commit) {
     if (-not $originalRef) { $originalRef = git rev-parse HEAD }
     Write-Host "Checking out $($resolved.Substring(0,7)) ..." -ForegroundColor Yellow
     git checkout --quiet $resolved
+}
+
+# --- Preflight: check HEAD is pushed to origin ---
+if (-not $PackOnly) {
+    git fetch origin --quiet 2>$null
+    $onRemote = git merge-base --is-ancestor HEAD origin/main 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "HEAD not pushed to origin — push first." -ForegroundColor Red
+        exit 1
+    }
 }
 
 # --- Preflight: check for cross-compile prerequisites ---
@@ -51,9 +65,9 @@ if ($needsCross -and -not (Get-Command nuget -ErrorAction SilentlyContinue)) {
 }
 
 try {
-    # --- Feed config (skip in pack-only mode) ---
+    # --- Feed config (skip in pack-only or skip-feed mode) ---
     $feedName = $null
-    if (-not $PackOnly) {
+    if (-not $PackOnly -and -not $SkipFeed) {
         $configPath = Join-Path $root 'tools\scripts\feed.config'
         if (-not (Test-Path $configPath)) {
             Write-Host "No feed configured. Let's set one up." -ForegroundColor Yellow
@@ -144,8 +158,12 @@ try {
         Write-Host "Artifacts: $staging" -ForegroundColor DarkGray
         return
     }
-    dotnet nuget push $pkg --source $feedName --api-key az
-    if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed" }
+    if (-not $SkipFeed) {
+        dotnet nuget push $pkg --source $feedName --api-key az
+        if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed" }
+    } else {
+        Write-Host "Skipping feed push (-SkipFeed)" -ForegroundColor Yellow
+    }
 
     # --- GitHub release (via REST API, no gh CLI needed) ---
     $ghToken = $env:GITHUB_TOKEN
@@ -160,9 +178,15 @@ try {
     } else {
         Write-Host "Creating GitHub release $version ..." -ForegroundColor Cyan
         $tag = "v$version"
-        # Extract latest CHANGELOG section as release notes
-        $cl = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw
-        $m = [regex]::Match($cl, '(?ms)^## \[.+?\]\s*\n(.*?)(?=^## \[|\z)')
+        # Extract release notes from CHANGELOG at branch tip (not checked-out commit)
+        $clRef = if ($originalRef) { $originalRef } else { 'HEAD' }
+        $cl = git show "${clRef}:CHANGELOG.md" 2>$null
+        if (-not $cl) { $cl = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw }
+        $commitHash = $hash
+        $m = [regex]::Match($cl, "(?ms)^## \[$commitHash\]\s*\n(.*?)(?=^## \[|\z)")
+        if (-not $m.Success) {
+            $m = [regex]::Match($cl, '(?ms)^## \[.+?\]\s*\n(.*?)(?=^## \[|\z)')
+        }
         $notes = if ($m.Success) { $m.Groups[1].Value.Trim() } else { '' }
 
         $headers = @{
@@ -190,11 +214,12 @@ try {
             foreach ($r in $RID) {
                 $zip = Join-Path $staging "bt-$r.zip"
                 $name = "bt-$r.zip"
+                $bytes = [System.IO.File]::ReadAllBytes($zip)
                 Invoke-RestMethod `
                     -Uri "${uploadBase}?name=$name" `
                     -Method Post -Headers $headers `
                     -ContentType 'application/zip' `
-                    -InFile $zip | Out-Null
+                    -Body $bytes | Out-Null
             }
         } catch {
             Write-Host "GitHub release failed: $_" -ForegroundColor Yellow
