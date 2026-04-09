@@ -1,12 +1,13 @@
 # bt agent skill
 
-Fast incremental C++/MSBuild builds — skip MSBuild on the inner loop.
+Fast incremental MSBuild/C++ builds -- skip MSBuild on the inner loop.
 
 ## What it does
 
-This skill teaches the agent to use [bt](https://github.com/sundaramramaswamy/bt)
-for incremental C++ builds instead of invoking MSBuild directly.  When you edit
-a few `.cpp` or `.h` files, bt builds in seconds — not minutes.
+This skill teaches the agent to use [bt][] for incremental builds instead of
+invoking MSBuild directly.  bt reads a binary log, builds an exact file-level
+dependency graph, and replays only the dirty steps -- compile, link, lib, MIDL,
+mdmerge, makepri, AppxManifest -- in seconds, not minutes.
 
 Activates when you ask the agent to compile, build, or query build dependencies
 in a repo with `.vcxproj` files.
@@ -15,7 +16,15 @@ in a repo with `.vcxproj` files.
 - "Build only the files I changed"
 - "What rebuilds if I edit this header?"
 - "Watch my sources and build on save"
-- "Show me what's dirty in this project"
+- "What sources feed into this DLL?"
+
+[bt]: https://github.com/sundaramramaswamy/bt
+
+## What bt handles
+
+CL, Link, Lib, MIDL, mdmerge, makepri, AppxManifest, Copy -- and precise
+`#include` edges from tracker logs.  Newly added `.cpp` files are inferred
+automatically; no full rebuild needed.
 
 ## Prerequisites
 
