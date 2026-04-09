@@ -1,21 +1,43 @@
 # Publish bt NativeAOT binaries to a NuGet feed
-# Run from repo root: tools\scripts\publish.ps1 [-RID <rid>]
+# Run from repo root: tools\scripts\publish.ps1 [-RID <rid>] [-Commit <hash>]
 #
 # First run creates tools\scripts\feed.config with your feed details.
 # feed.config is gitignored — no corp URLs in the repo.
 #
 # By default builds win-x64 and win-arm64. Pass -RID to build only one.
 # Pass -PackOnly to build and pack without publishing to feed or GitHub.
+# Pass -Commit to checkout and build a specific commit (requires clean tree).
 # Set GITHUB_TOKEN env var to create a GitHub release with zip assets.
 # Falls back to Git Credential Manager when GITHUB_TOKEN is unset.
 param(
     [string[]]$RID = @('win-x64', 'win-arm64'),
-    [switch]$PackOnly
+    [switch]$PackOnly,
+    [string]$Commit
 )
 
 $ErrorActionPreference = 'Stop'
 $root = git rev-parse --show-toplevel
 Push-Location $root
+
+# --- Checkout specific commit if requested ---
+$originalRef = $null
+if ($Commit) {
+    $dirty = git status --porcelain
+    if ($dirty) {
+        Write-Host "Working tree is not clean — commit or stash changes first." -ForegroundColor Red
+        $dirty | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+        exit 1
+    }
+    $resolved = git rev-parse --verify "$Commit^{commit}" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Not a valid commit: $Commit" -ForegroundColor Red
+        exit 1
+    }
+    $originalRef = git symbolic-ref --short HEAD 2>$null
+    if (-not $originalRef) { $originalRef = git rev-parse HEAD }
+    Write-Host "Checking out $($resolved.Substring(0,7)) ..." -ForegroundColor Yellow
+    git checkout --quiet $resolved
+}
 
 # --- Preflight: check for cross-compile prerequisites ---
 $hostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
@@ -150,10 +172,11 @@ try {
         $owner = 'sundaramramaswamy'
         $repo  = 'bt'
         $body  = @{
-            tag_name   = $tag
-            name       = $tag
-            body       = $notes
-            prerelease = $true
+            tag_name         = $tag
+            target_commitish = (git rev-parse HEAD)
+            name             = $tag
+            body             = $notes
+            prerelease       = $true
         } | ConvertTo-Json
 
         try {
@@ -183,6 +206,10 @@ try {
     Write-Host "Install:  nuget install Bt -Version $version -Source $feedName -OutputDirectory ~\tools" -ForegroundColor DarkGray
 }
 finally {
+    if ($originalRef) {
+        Write-Host "Restoring $originalRef ..." -ForegroundColor Yellow
+        git checkout --quiet $originalRef
+    }
     Pop-Location
     if (-not $PackOnly -and (Test-Path (Join-Path $root 'staging'))) {
         Remove-Item (Join-Path $root 'staging') -Recurse -Force
