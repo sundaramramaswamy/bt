@@ -180,7 +180,7 @@ try {
         $tag = "v$version"
         # Extract release notes from CHANGELOG at branch tip (not checked-out commit)
         $clRef = if ($originalRef) { $originalRef } else { 'HEAD' }
-        $cl = git show "${clRef}:CHANGELOG.md" 2>$null
+        $cl = (git show "${clRef}:CHANGELOG.md" 2>$null) -join "`n"
         if (-not $cl) { $cl = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw }
         $commitHash = $hash
         $m = [regex]::Match($cl, "(?ms)^## \[$commitHash\]\s*\n(.*?)(?=^## \[|\z)")
