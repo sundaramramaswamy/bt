@@ -259,13 +259,45 @@ static class BuildGraphFactory
         }
 
         // CompileXaml: .xaml → generated .xaml.g.h, .g.cpp, .xbf
+        // Collect all CompileXaml tasks, then group by (project, target) to create
+        // one CommandNode per MSBuild target invocation.  The XAML compiler processes
+        // all pages in a project together; individual .xaml files aren't compilable
+        // in isolation.
+
+        // Extract Configuration, Platform, and MSBuild path for the command line.
+        string? msbuildPath = null;
+        string? buildCfg = null;
+        string? buildPlat = null;
+        foreach (var p in build.FindChildrenRecursive<Property>(
+            p => p.Name is "MSBuildToolsPath" or "Configuration" or "Platform"))
+        {
+            switch (p.Name)
+            {
+                case "MSBuildToolsPath" when msbuildPath == null:
+                    msbuildPath = Path.Combine(p.Value ?? "", "MSBuild.exe");
+                    break;
+                case "Configuration" when buildCfg == null:
+                    buildCfg = p.Value;
+                    break;
+                case "Platform" when buildPlat == null:
+                    buildPlat = p.Value;
+                    break;
+            }
+            if (msbuildPath != null && buildCfg != null && buildPlat != null) break;
+        }
+
+        // Group CompileXaml tasks by (project file, target name)
+        var xamlGroups = new Dictionary<string, (string proj, string projDir, string projFile,
+            string target, List<string> inputs, List<string> outputs)>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name == "CompileXaml"))
         {
             var projNode = task.GetNearestParent<Project>();
             var proj = projNode?.Name ?? "unknown";
+            var projFile = projNode?.ProjectFile != null
+                ? Path.GetFullPath(projNode.ProjectFile) : "";
             var projDir = projNode?.ProjectFile != null
-                ? Path.GetDirectoryName(Path.GetFullPath(projNode.ProjectFile)) ?? ""
-                : "";
+                ? Path.GetDirectoryName(projFile) ?? "" : "";
             var target = task.GetNearestParent<Target>()?.Name ?? "unknown";
             var pf = FindChildFolder(task.Children, "Parameters");
             if (pf == null) continue;
@@ -278,7 +310,7 @@ static class BuildGraphFactory
 
             // Gather output files from OutputItems
             var of = FindChildFolder(task.Children, "OutputItems");
-            var allOutputs = new List<string>();
+            var taskOutputs = new List<string>();
             if (of != null)
             {
                 foreach (var paramName in new[] { "_GeneratedCodeFiles", "_GeneratedXbfFiles" })
@@ -288,58 +320,54 @@ static class BuildGraphFactory
                         if (of.Children[ci] is not NamedNode nn || nn.Name != paramName) continue;
                         for (int ji = 0; ji < nn.Children.Count; ji++)
                             if (nn.Children[ji] is Item item)
-                                allOutputs.Add(graph.ToRelative(ResolveAbsolute(projDir, item.Text)));
+                                taskOutputs.Add(graph.ToRelative(ResolveAbsolute(projDir, item.Text)));
                     }
                 }
             }
-            if (allOutputs.Count == 0) continue;
+            if (taskOutputs.Count == 0) continue;
 
-            // Match each .xaml to its outputs by stem
-            var sharedOutputs = new List<string>(allOutputs);
-            foreach (var xaml in xamlInputs)
+            // Merge into group
+            var groupKey = $"{projFile}|{target}";
+            if (!xamlGroups.TryGetValue(groupKey, out var grp))
             {
-                var stem = Path.GetFileNameWithoutExtension(xaml);
-                var fullStem = Path.GetFileName(xaml);
-                var matched = new List<string>();
-                foreach (var o in allOutputs)
-                {
-                    var fn = Path.GetFileName(o);
-                    if (fn.StartsWith(fullStem + ".", StringComparison.OrdinalIgnoreCase)
-                        || fn.StartsWith(stem + ".xbf", StringComparison.OrdinalIgnoreCase))
-                        matched.Add(o);
-                }
-                if (matched.Count == 0) continue;
+                grp = (proj, projDir, projFile, target, new List<string>(), new List<string>());
+                xamlGroups[groupKey] = grp;
+            }
+            foreach (var i in xamlInputs)
+                if (!grp.inputs.Contains(i, StringComparer.OrdinalIgnoreCase))
+                    grp.inputs.Add(i);
+            foreach (var o in taskOutputs)
+                if (!grp.outputs.Contains(o, StringComparer.OrdinalIgnoreCase))
+                    grp.outputs.Add(o);
+        }
 
-                foreach (var m in matched) sharedOutputs.Remove(m);
+        // Create one CommandNode per (project, target) group
+        foreach (var (_, grp) in xamlGroups)
+        {
+            var cmdId = $"CompileXaml#{cmdIndex++}:{grp.proj}/{grp.target}";
 
-                var cmdId = $"CompileXaml#{cmdIndex++}:{proj}/{target}";
-                var cmd = new CommandNode(cmdId, "CompileXaml", proj, target, [xaml], matched);
-                graph.Commands[cmdId] = cmd;
-                graph.Files.TryAdd(xaml, new FileNode(xaml, FileKinds.Classify(xaml)));
-                graph.AddConsumer(xaml, cmdId);
-                foreach (var output in matched)
-                {
-                    graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
-                    graph.FileToProducer.TryAdd(output, cmdId);
-                }
+            // Build msbuild command line
+            var cmdLine = "";
+            if (msbuildPath != null && !string.IsNullOrEmpty(grp.projFile))
+            {
+                var args = $"\"{grp.projFile}\" /t:{grp.target} /v:quiet /nologo";
+                if (buildCfg != null) args += $" /p:Configuration={buildCfg}";
+                if (buildPlat != null) args += $" /p:Platform={buildPlat}";
+                cmdLine = $"\"{msbuildPath}\" {args}";
             }
 
-            // Shared outputs (XamlTypeInfo.g.cpp, XamlLibMetadataProvider.g.cpp, etc.)
-            if (sharedOutputs.Count > 0)
+            var cmd = new CommandNode(cmdId, "CompileXaml", grp.proj, grp.target,
+                grp.inputs, grp.outputs, cmdLine, grp.projDir);
+            graph.Commands[cmdId] = cmd;
+            foreach (var input in grp.inputs)
             {
-                var cmdId = $"CompileXaml#{cmdIndex++}:{proj}/{target}";
-                var cmd = new CommandNode(cmdId, "CompileXaml", proj, target, xamlInputs, sharedOutputs);
-                graph.Commands[cmdId] = cmd;
-                foreach (var input in xamlInputs)
-                {
-                    graph.Files.TryAdd(input, new FileNode(input, FileKinds.Classify(input)));
-                    graph.AddConsumer(input, cmdId);
-                }
-                foreach (var output in sharedOutputs)
-                {
-                    graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
-                    graph.FileToProducer.TryAdd(output, cmdId);
-                }
+                graph.Files.TryAdd(input, new FileNode(input, FileKinds.Classify(input)));
+                graph.AddConsumer(input, cmdId);
+            }
+            foreach (var output in grp.outputs)
+            {
+                graph.Files.TryAdd(output, new FileNode(output, FileKinds.Classify(output)));
+                graph.FileToProducer.TryAdd(output, cmdId);
             }
         }
 
