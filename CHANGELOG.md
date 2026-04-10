@@ -5,13 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
-## [8d7df6c]
+## [81e588e] — 2026-04-10
+
+### Added
+- **CompileXaml execution**: dirty `.xaml` files now trigger XAML
+  compilation via `msbuild /t:MarkupCompilePass1` (and Pass2).
+  Previously bt only tracked `.xaml` dependencies but could not
+  regenerate `.xbf`, `.g.h`, or `.g.cpp` files.
+
+## [8d7df6c] — 2026-04-09
 
 ### Added
 - `bt update` now shows relevant CHANGELOG blurb.
 - Telemetry opt-out: set `BT_NO_TELEMETRY=1` to disable all telemetry.
 
-## [d30ccc4]
+## [d30ccc4] — 2026-04-09
 
 ### Fixed
 - **`bt build` on a fresh CMD hangs at LINK**: only 6 per-project
@@ -19,7 +27,7 @@ Versions are identified by commit hash (short).
   etc.) from the MSBuild process were missing.  Now extracts the full
   environment from the binlog's Environment folder.
 
-## [9279fe5]
+## [9279fe5] — 2026-04-07
 
 ### Added
 - `bt update` — self-update from GitHub Releases.  Checks the latest
@@ -28,7 +36,7 @@ Versions are identified by commit hash (short).
   `--check` flag for version check without downloading.  Respects
   `GITHUB_TOKEN` for private repos / rate limiting.
 
-## [4b4c6e4]
+## [4b4c6e4] — 2026-04-07
 
 ### Fixed
 - **Failed binlog no longer blocks bt**: when a cached graph exists
@@ -36,7 +44,7 @@ Versions are identified by commit hash (short).
   the last good cache instead of exiting.  Previously required a
   successful `msbuild /bl` before bt would work again.
 
-## [feb2e45]
+## [feb2e45] — 2026-04-02
 
 ### Added
 - `graph --headers` — when used with `-f`, includes all tlog-recorded
@@ -61,7 +69,7 @@ Versions are identified by commit hash (short).
   intermediates (e.g. `pch_hdr.src`) have newer timestamps than
   outputs.
 
-## [be4f896]
+## [be4f896] — 2026-03-25
 
 ### Added
 - **Failed-binlog guard**: `bt` now rejects binlogs from failed builds,
@@ -84,7 +92,7 @@ Versions are identified by commit hash (short).
   ignored when `--help` / `-?` / `/?` triggered the help action).
 - `bt --color never help` no longer fails with "unrecognized command".
 
-## [17f1648]
+## [17f1648] — 2026-03-25
 
 ### Added
 - **Source inference**: when a `.vcxproj` (or imported `.vcxitems`) has a
@@ -95,7 +103,7 @@ Versions are identified by commit hash (short).
   Per-file metadata (e.g. per-file optimisation overrides) triggers a warning
   and falls back to peer flags; run `msbuild -bl` once for exact flags.
 
-## [e3797be]
+## [e3797be] — 2026-03-23
 
 ### Added
 - `build -c` / `--compile-only` — run only first-level compile
@@ -104,7 +112,7 @@ Versions are identified by commit hash (short).
   mode (`bt build -c`).  Useful for fast syntax-check workflows and
   MCP tools.
 
-## [459dfd1]
+## [459dfd1] — 2026-03-22
 
 ### Fixed
 - **Watch missed pre-existing dirty files**: `bt watch` only caught
@@ -115,7 +123,7 @@ Versions are identified by commit hash (short).
   direct edges from `pch.cpp` to every object file.  `.pch` is now
   dev-visible, correctly showing `pch.cpp → pch.pch → *.obj`.
 
-## [38f7480]
+## [38f7480] — 2026-03-22
 
 ### Fixed
 - **Build deadlock on command failure**: downstream commands waited
@@ -141,7 +149,7 @@ Versions are identified by commit hash (short).
   before the sequential topo walk.
 - Build plan line no longer shows a misleading parallel count.
 
-## [1c0c6af]
+## [1c0c6af] — 2026-03-21
 
 ### Added
 - `bt help` as alias for `bt --help`.
@@ -160,19 +168,19 @@ Versions are identified by commit hash (short).
 - `build --dry-run` shows working directory (`cd <dir>`) so printed
   commands are reproducible.
 
-## [d28fcd1]
+## [d28fcd1] — 2026-03-19
 
 ### Changed
 - **Graph cache rewritten**: JSON+gzip replaced with FlatBuffers.
   Sorted string table with integer indices.  ~700 ms → ~20 ms load.
 
-## [7ab790e]
+## [7ab790e] — 2026-03-19
 
 ### Added
 - `bt watch` — watch source files and rebuild on change (`--debounce`).
 - `bt cache` — parse binlog and cache graph without building.
 
-## [a3dc044]
+## [a3dc044] — 2026-03-19
 
 ### Added
 - Per-project environment replay from binlog SetEnv tasks (INCLUDE,
@@ -185,12 +193,12 @@ Versions are identified by commit hash (short).
 - stdout/stderr pipe deadlock in command execution.
 - Stale mtime after incremental link: touch outputs on success.
 
-## [fffbdc8]
+## [fffbdc8] — 2026-03-13
 
 ### Added
 - `bt compiledb` — generate `compile_commands.json` for clangd/clang-tidy.
 
-## [07e40ed]
+## [07e40ed] — 2026-03-13
 
 ### Added
 - `bt build [files]` — parallel wave execution of dirty commands.
@@ -201,7 +209,7 @@ Versions are identified by commit hash (short).
 - PCH (`/Yc`, `/Yu`) support in dependency graph.
 - External header filtering via CAExcludePath.
 
-## [a3c29d6]
+## [a3c29d6] — 2026-03-13
 
 ### Added
 - `bt dirty [files]` — topo-sorted build plan from changed files.
@@ -210,7 +218,7 @@ Versions are identified by commit hash (short).
 ### Changed
 - Renamed `outs` → `bins`, `affected` → `dirty`.
 
-## [e7b0c82]
+## [e7b0c82] — 2026-03-13
 
 ### Added
 - Precise tlog-based `#include` tracking (CL.read.1.tlog), with
@@ -224,7 +232,7 @@ Versions are identified by commit hash (short).
 - `outputs-of` / `sources-of` renamed to `bins` / `srcs`, shown as
   dependency trees with tool labels.
 
-## [d29211d]
+## [d29211d] — 2026-03-13
 
 ### Added
 - mdmerge step (unmerged → merged `.winmd`).
@@ -233,14 +241,14 @@ Versions are identified by commit hash (short).
 - AppxPackageRecipe (`.exe` + `.pri` + manifest → `.appxrecipe`).
 - Copy tasks in graph.
 
-## [a053b9c]
+## [a053b9c] — 2026-03-13
 
 ### Added
 - MIDL task in graph — `.idl` files now tracked.
 - CompileXaml and IDL → generated-header graph edges.
 - BinlogExplorer tool for binlog introspection.
 
-## [7f5802d]
+## [7f5802d] — 2026-03-13
 
 ### Added
 - Graphviz DOT graph output (`bt graph`).
@@ -248,7 +256,7 @@ Versions are identified by commit hash (short).
 - `--color auto|always|never` flag.
 - ANSI terminal colours.
 
-## [5ec46bf]
+## [5ec46bf] — 2026-03-13
 
 ### Added
 - Initial CLI: parse binlog, build command-based DAG, query
@@ -260,4 +268,4 @@ Versions are identified by commit hash (short).
 |:---:|:---:|---|
 | 1 | d28fcd1 | Initial FlatBuffers schema |
 | 2 | bd14db9 | Skip CreateWinMD; project on `#include` commands |
-| 3 | 34f6cdb | Global env from binlog Environment folder |
+| 3 | 67d71a2 | Global env from binlog Environment folder |

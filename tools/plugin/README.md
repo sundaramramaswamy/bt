@@ -7,7 +7,7 @@ Fast incremental MSBuild/C++ builds -- skip MSBuild on the inner loop.
 This skill teaches the agent to use [bt][] for incremental builds instead of
 invoking MSBuild directly.  bt reads a binary log, builds an exact file-level
 dependency graph, and replays only the dirty steps -- compile, link, lib, MIDL,
-mdmerge, makepri, AppxManifest -- in seconds, not minutes.
+CompileXaml, mdmerge, makepri, AppxManifest -- in seconds, not minutes.
 
 Activates when you ask the agent to compile, build, or query build dependencies
 in a repo with `.vcxproj` files.
@@ -22,9 +22,9 @@ in a repo with `.vcxproj` files.
 
 ## What bt handles
 
-CL, Link, Lib, MIDL, mdmerge, makepri, AppxManifest, Copy -- and precise
-`#include` edges from tracker logs.  Newly added `.cpp` files are inferred
-automatically; no full rebuild needed.
+CL, Link, Lib, MIDL, CompileXaml, mdmerge, makepri, AppxManifest, Copy -- and
+precise `#include` edges from tracker logs.  Newly added `.cpp` files are
+inferred automatically; no full rebuild needed.
 
 ## Prerequisites
 
