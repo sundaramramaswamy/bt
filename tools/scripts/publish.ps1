@@ -183,9 +183,9 @@ try {
         $cl = (git show "${clRef}:CHANGELOG.md" 2>$null) -join "`n"
         if (-not $cl) { $cl = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw }
         $commitHash = $hash
-        $m = [regex]::Match($cl, "(?ms)^## \[$commitHash\]\s*\n(.*?)(?=^## \[|\z)")
+        $m = [regex]::Match($cl, "(?ms)^## \[$commitHash\].*?\n(.*?)(?=^## \[|\z)")
         if (-not $m.Success) {
-            $m = [regex]::Match($cl, '(?ms)^## \[.+?\]\s*\n(.*?)(?=^## \[|\z)')
+            $m = [regex]::Match($cl, '(?ms)^## \[.+?\].*?\n(.*?)(?=^## \[|\z)')
         }
         $notes = if ($m.Success) { $m.Groups[1].Value.Trim() } else { '' }
 
