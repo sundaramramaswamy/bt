@@ -5,13 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
-## [81e588e] — 2026-04-10
+## [Unreleased]
 
 ### Added
 - **CompileXaml execution**: dirty `.xaml` files now trigger XAML
   compilation via `msbuild /t:MarkupCompilePass1` (and Pass2).
   Previously bt only tracked `.xaml` dependencies but could not
   regenerate `.xbf`, `.g.h`, or `.g.cpp` files.
+
+### Fixed
+- **`bt build` hangs in shells with debugger env vars**: shell vars
+  like `_NT_SYMBOL_PATH`, `DBGHELP_*`, `PGOBuildMode` leaked into
+  child processes, causing link.exe to hang on symbol server lookups.
+  Child process environment is now built exclusively from the binlog.
+
+### Changed
+- **`build` / `dirty` are now target-oriented (make-style)**:
+  args are targets you want up-to-date, not "changed sources."
+  `bt build MyApp.dll` walks backward to find dirty inputs and
+  builds only what that target needs.  Sources (`.cpp`, `.h`)
+  still work — they walk forward.  Both paths now use mtime-based
+  dirty detection (previously explicit files skipped mtime).
+  `-c` is a unified post-filter; no separate code path.
 
 ## [8d7df6c] — 2026-04-09
 

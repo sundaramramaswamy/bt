@@ -48,17 +48,18 @@ Do NOT attempt to run bt without a binlog — it will fail.
 bt build                      # mtime-based — build only dirty files
 ```
 
-### Build only what a specific file affects
+### Build a specific target
 
 ```
-bt build -f MyFile.cpp        # forward walk from that file
+bt build MyApp.dll            # backward walk — only what this target needs
+bt build MyLib.lib             # build only this library
 ```
 
 ### Compile only (skip link)
 
 ```
 bt build -c                   # compile dirty sources, don't link
-bt build -c -f MyFile.cpp     # compile only what this file affects
+bt build -c MyApp.dll         # compile only sources feeding this target
 ```
 
 ### Dry run — see what would build
@@ -78,7 +79,7 @@ bt watch --run .\deploy.ps1   # build + run a command after
 
 ```
 bt dirty                      # what needs rebuilding right now?
-bt dirty MyFile.cpp           # build plan for specific file(s)
+bt dirty MyApp.dll            # build plan scoped to a target
 bt bins MyHeader.h            # what rebuilds when this header changes?
 bt srcs MyApp.dll             # what sources feed into this binary?
 bt srcs --headers MyFile.cpp  # upstream sources + all #include headers

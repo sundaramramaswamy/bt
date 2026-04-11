@@ -28,10 +28,10 @@ bt srcs --headers MyFile.cpp  # upstream + all #include headers
 
 # Build
 bt dirty                      # build plan from file timestamps (mtime)
-bt dirty MyFile.cpp           # build plan for specific file(s)
+bt dirty MyApp.dll            # build plan scoped to a target
 bt build                      # rebuild only what's stale
-bt build -f MyFile.cpp        # rebuild only what this file affects
-bt build -c MyFile.cpp        # compile only — skip link/lib
+bt build MyApp.dll            # rebuild only what this target needs
+bt build -c MyApp.dll         # compile only — skip link/lib
 bt build -n                   # dry-run — show commands without executing
 bt watch                      # watch sources, rebuild on save
 bt watch --run .\deploy.ps1   # watch + run command after each build
@@ -52,8 +52,8 @@ binlog parsing unless the binlog changes.
 |---------|-------------|
 | `bins <files>` | Downstream dependency tree — what rebuilds when `<file>` changes |
 | `srcs <files>` | Upstream dependency tree — what sources feed into `<file>` (`--headers` for includes) |
-| `dirty [files]` | Topo-sorted build plan (default: mtime-based; explicit files override) |
-| `build [files]` | Execute dirty commands in parallel waves (`-j N`, `--dry-run`) |
+| `dirty [targets]` | Topo-sorted build plan (default: all mtime-dirty; targets scope the check) |
+| `build [targets]` | Execute dirty commands in parallel waves (`-j N`, `--dry-run`) |
 | `watch` | Watch sources and rebuild on change (`--debounce`, `--run <cmd>`) |
 | `update` | Check for and install updates from GitHub (`--check` for dry run) |
 | `compiledb` | Generate `compile_commands.json` for clangd / clang-tidy |
