@@ -257,8 +257,10 @@ static class BuildCommand
             UseShellExecute = false,
         };
 
-        // Apply environment from binlog: global env first (base), then
-        // per-project SetEnv overlay (PATH, INCLUDE, LIB, etc.).
+        // Start with a clean environment — don't inherit shell vars
+        // (e.g. _NT_SYMBOL_PATH, DBGHELP_*) that can cause tools to hang.
+        // Apply binlog vars only: GlobalEnv (base), then ProjectEnv (overlay).
+        psi.Environment.Clear();
         if (globalEnv is { Count: > 0 })
             foreach (var (k, v) in globalEnv)
                 psi.Environment[k] = v;
