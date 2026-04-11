@@ -47,8 +47,8 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
           {Clr.Cyan}graph{Clr.Reset}              Emit Graphviz DOT dependency graph
           {Clr.Cyan}bins{Clr.Reset} <files>       Downstream dependency tree
           {Clr.Cyan}srcs{Clr.Reset} <files>       Upstream dependency tree
-          {Clr.Cyan}dirty{Clr.Reset} [files]      Build plan (mtime-based, or explicit files)
-          {Clr.Cyan}build{Clr.Reset} [files]      Build only what's dirty (-j N, -n, -c)
+          {Clr.Cyan}dirty{Clr.Reset} [targets]    Build plan (mtime-based; scope to specific targets)
+          {Clr.Cyan}build{Clr.Reset} [targets]    Build only what's dirty (-j N, -n, -c)
           {Clr.Cyan}compiledb{Clr.Reset}          Generate compile_commands.json (-o path)
           {Clr.Cyan}cache{Clr.Reset}              Parse binlog and cache dependency graph
           {Clr.Cyan}watch{Clr.Reset}              Watch sources and rebuild on change
@@ -76,11 +76,11 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
           {Clr.Dim}bt bins TestDataItem.h{Clr.Reset}
           {Clr.Dim}bt srcs XaBench.exe{Clr.Reset}
           {Clr.Dim}bt dirty{Clr.Reset}
-          {Clr.Dim}bt dirty src/Foo.cpp src/Bar.h{Clr.Reset}
+          {Clr.Dim}bt dirty MyApp.dll{Clr.Reset}
           {Clr.Dim}bt build{Clr.Reset}
-          {Clr.Dim}bt build -j 4 src/Foo.cpp{Clr.Reset}
+          {Clr.Dim}bt build -j 4 MyApp.dll{Clr.Reset}
           {Clr.Dim}bt build --dry-run{Clr.Reset}
-          {Clr.Dim}bt build -c src/Foo.cpp{Clr.Reset}
+          {Clr.Dim}bt build -c MyApp.dll{Clr.Reset}
           {Clr.Dim}bt compiledb{Clr.Reset}
 
         {Clr.Dim}Telemetry: anonymous usage data is collected. See PRIVACY.md.{Clr.Reset}
@@ -141,12 +141,12 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
         """;
 
     static string DirtyHelp() => $"""
-        {Clr.Bold}bt dirty{Clr.Reset} — Build plan for changed files
+        {Clr.Bold}bt dirty{Clr.Reset} — Build plan for dirty targets
 
-        {Clr.Yellow}Usage:{Clr.Reset}  bt dirty [files]
+        {Clr.Yellow}Usage:{Clr.Reset}  bt dirty [targets]
 
         {Clr.Yellow}Arguments:{Clr.Reset}
-          {Clr.Cyan}[files]{Clr.Reset}  Changed files {Clr.Dim}(default: all mtime-dirty){Clr.Reset}
+          {Clr.Cyan}[targets]{Clr.Reset}  Targets to check {Clr.Dim}(default: all mtime-dirty){Clr.Reset}
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}--binlog{Clr.Reset} <path>  Path to .binlog file  {Clr.Dim}[default: msbuild.binlog]{Clr.Reset}
@@ -154,16 +154,16 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
 
         {Clr.Yellow}Examples:{Clr.Reset}
           {Clr.Dim}bt dirty{Clr.Reset}
-          {Clr.Dim}bt dirty src/Foo.cpp src/Bar.h{Clr.Reset}
+          {Clr.Dim}bt dirty MyApp.dll{Clr.Reset}
         """;
 
     static string BuildHelp() => $"""
         {Clr.Bold}bt build{Clr.Reset} — Build only what's dirty
 
-        {Clr.Yellow}Usage:{Clr.Reset}  bt build [files] [options]
+        {Clr.Yellow}Usage:{Clr.Reset}  bt build [targets] [options]
 
         {Clr.Yellow}Arguments:{Clr.Reset}
-          {Clr.Cyan}[files]{Clr.Reset}  Files to build {Clr.Dim}(default: all mtime-dirty){Clr.Reset}
+          {Clr.Cyan}[targets]{Clr.Reset}  Targets to build {Clr.Dim}(default: all mtime-dirty){Clr.Reset}
 
         {Clr.Yellow}Options:{Clr.Reset}
           {Clr.Green}-j{Clr.Reset} <N>              Max parallel jobs     {Clr.Dim}[default: CPU cores]{Clr.Reset}
@@ -174,9 +174,10 @@ sealed class ColoredHelpAction(string versionShort, Option<string>? colorOption 
 
         {Clr.Yellow}Examples:{Clr.Reset}
           {Clr.Dim}bt build{Clr.Reset}
-          {Clr.Dim}bt build -j 4 src/Foo.cpp{Clr.Reset}
+          {Clr.Dim}bt build MyApp.dll{Clr.Reset}
+          {Clr.Dim}bt build -j 4 MyLib.lib{Clr.Reset}
           {Clr.Dim}bt build --dry-run{Clr.Reset}
-          {Clr.Dim}bt build -c src/Foo.cpp{Clr.Reset}
+          {Clr.Dim}bt build -c MyApp.dll{Clr.Reset}
         """;
 
     static string CompileDbHelp() => $"""

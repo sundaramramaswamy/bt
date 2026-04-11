@@ -37,11 +37,11 @@ var srcsHeadersOption = new Option<bool>("--headers") { Description = "Include t
 sourcesOfCmd.Add(sourcesFilesArg);
 sourcesOfCmd.Add(srcsHeadersOption);
 
-var affectedFilesArg = new Argument<string[]>("files") { Description = "Changed files (default: git diff)", Arity = ArgumentArity.ZeroOrMore };
-var affectedCmd = new Command("dirty", "Build plan for changed files");
+var affectedFilesArg = new Argument<string[]>("files") { Description = "Targets to check (default: all)", Arity = ArgumentArity.ZeroOrMore };
+var affectedCmd = new Command("dirty", "Build plan for dirty targets");
 affectedCmd.Add(affectedFilesArg);
 
-var buildFilesArg = new Argument<string[]>("files") { Description = "Changed files (default: git diff)", Arity = ArgumentArity.ZeroOrMore };
+var buildFilesArg = new Argument<string[]>("files") { Description = "Targets to build (default: all dirty)", Arity = ArgumentArity.ZeroOrMore };
 var buildJobsOption = new Option<int>("-j") { Description = "Max parallel jobs (default: CPU cores)" };
 buildJobsOption.DefaultValueFactory = _ => Environment.ProcessorCount;
 var buildDryRunOption = new Option<bool>("--dry-run") { Description = "Print commands without executing" };

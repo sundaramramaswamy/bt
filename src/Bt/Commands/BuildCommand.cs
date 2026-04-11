@@ -6,9 +6,9 @@ static class BuildCommand
     {
         List<CommandNode> plan;
 
+        HashSet<string>? commandScope = null;
         if (explicitFiles.Length > 0)
         {
-            // Explicit files: resolve and walk forward
             var resolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var arg in explicitFiles)
             {
@@ -20,22 +20,17 @@ static class BuildCommand
                 Console.Error.WriteLine($"{Clr.Green}Nothing to build.{Clr.Reset}");
                 return BuildResult.UpToDate;
             }
-            plan = compileOnly
-                ? g.GetCompileCommandsFor(resolved)
-                : g.GetAffectedCommands(resolved);
+            commandScope = g.GetCommandCone(resolved);
         }
-        else
+
+        Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
+        plan = g.GetDirtyCommandsByMtime(commandScope).Plan;
+        if (compileOnly)
         {
-            // Default: mtime-based dirty detection
-            Console.Error.WriteLine($"{Clr.Dim}Checking file timestamps...{Clr.Reset}");
-            plan = g.GetDirtyCommandsByMtime().Plan;
-            if (compileOnly)
-            {
-                var compileOnly_ = new List<CommandNode>(plan.Count);
-                foreach (var c in plan)
-                    if (BuildGraph.IsCompileTool(c.Tool)) compileOnly_.Add(c);
-                plan = compileOnly_;
-            }
+            var filtered_ = new List<CommandNode>(plan.Count);
+            foreach (var c in plan)
+                if (BuildGraph.IsCompileTool(c.Tool)) filtered_.Add(c);
+            plan = filtered_;
         }
 
         if (plan.Count == 0)

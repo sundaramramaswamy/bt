@@ -328,17 +328,60 @@ class BuildGraph
         return deduped;
     }
 
+    /// Collect the cone of commands reachable from a set of files.
+    /// Output files (have a producer) walk backward; source files walk forward.
+    public HashSet<string> GetCommandCone(IEnumerable<string> files)
+    {
+        var cmds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in files)
+        {
+            if (FileToProducer.ContainsKey(file))
+                CollectBackwardCommands(file, visited, cmds);
+            else
+                CollectForwardCommands(file, visited, cmds);
+        }
+        return cmds;
+    }
+
+    void CollectBackwardCommands(string file, HashSet<string> visited, HashSet<string> cmds)
+    {
+        if (!visited.Add(file)) return;
+        if (!FileToProducer.TryGetValue(file, out var cmdId)) return;
+        if (!Commands.TryGetValue(cmdId, out var cmd)) return;
+        if (cmd.Tool.StartsWith('#')) return;
+        cmds.Add(cmdId);
+        foreach (var input in cmd.Inputs)
+            CollectBackwardCommands(input, visited, cmds);
+    }
+
+    void CollectForwardCommands(string file, HashSet<string> visited, HashSet<string> cmds)
+    {
+        if (!visited.Add(file)) return;
+        if (!FileToConsumers.TryGetValue(file, out var consumerIds)) return;
+        foreach (var cmdId in consumerIds)
+        {
+            if (!Commands.TryGetValue(cmdId, out var cmd)) continue;
+            cmds.Add(cmdId);
+            foreach (var output in cmd.Outputs)
+                CollectForwardCommands(output, visited, cmds);
+        }
+    }
+
     /// Find dirty commands by comparing file timestamps (make/ninja-style).
     /// A command is dirty if any input is newer than any output, or if any
     /// output is missing. Dirty propagates forward through the graph.
     /// Returns commands in topological order, skipping synthetic (#include),
     /// along with a map from each dirty source file to the commands it triggered.
-    public (List<CommandNode> Plan, Dictionary<string, List<CommandNode>> DirtySources) GetDirtyCommandsByMtime()
+    /// When commandScope is provided, only commands in the scope are considered.
+    public (List<CommandNode> Plan, Dictionary<string, List<CommandNode>> DirtySources) GetDirtyCommandsByMtime(
+        HashSet<string>? commandScope = null)
     {
-        // Topo-sort ALL real commands first (Kahn's algorithm)
+        // Topo-sort real commands (Kahn's algorithm)
         var realCmds = new List<CommandNode>();
         foreach (var c in Commands.Values)
-            if (!c.Tool.StartsWith("#")) realCmds.Add(c);
+            if (!c.Tool.StartsWith("#") && (commandScope is null || commandScope.Contains(c.Id)))
+                realCmds.Add(c);
         var inDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var dependents = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var cmd in realCmds)
