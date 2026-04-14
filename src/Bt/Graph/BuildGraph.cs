@@ -485,7 +485,7 @@ class BuildGraph
                 }
 
                 DateTime maxInputTime = DateTime.MinValue;
-                string? newestInput = null;
+                var newestInputs = new List<string>();
                 foreach (var input in allInputs)
                 {
                     // Skip inputs co-located with outputs — they are build
@@ -495,10 +495,18 @@ class BuildGraph
                     if (inputDir is not null && outputDirs.Contains(inputDir)) continue;
 
                     var mtime = mtimeCache.GetValueOrDefault(input);
-                    if (mtime is { } t && t > maxInputTime)
+                    if (mtime is { } t)
                     {
-                        maxInputTime = t;
-                        newestInput = input;
+                        if (t > maxInputTime)
+                        {
+                            maxInputTime = t;
+                            newestInputs.Clear();
+                            newestInputs.Add(input);
+                        }
+                        else if (t == maxInputTime)
+                        {
+                            newestInputs.Add(input);
+                        }
                     }
                 }
 
@@ -506,7 +514,7 @@ class BuildGraph
                 {
                     var mtime = mtimeCache.GetValueOrDefault(output);
                     if (mtime is null) { dirty = true; triggers.Add(output + " (missing)"); break; }
-                    if (maxInputTime > mtime.Value) { dirty = true; if (newestInput != null) triggers.Add(newestInput); break; }
+                    if (maxInputTime > mtime.Value) { dirty = true; triggers.UnionWith(newestInputs); break; }
                 }
             }
 
