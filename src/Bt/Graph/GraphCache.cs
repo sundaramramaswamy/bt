@@ -5,7 +5,7 @@ using FlatSharp;
 /// Uses a sorted string table with integer indices for compact storage.
 static class GraphCache
 {
-    const int CacheVersion = 3;
+    const int CacheVersion = 4;
     static readonly ISerializer<GraphFb> Serializer = GraphFb.Serializer;
 
     public static void Save(string path, BuildGraph graph, DateTime binlogStamp)
@@ -172,7 +172,6 @@ static class GraphCache
                 graph.AddConsumer(input, cmd.Id);
             foreach (var output in cmd.Outputs)
             {
-                graph.FileToProducer.TryAdd(output, cmd.Id);
                 if (cmd.Tool.StartsWith("#"))
                 {
                     if (!graph.SyntheticProducers.TryGetValue(output, out var spList))
@@ -181,6 +180,10 @@ static class GraphCache
                         graph.SyntheticProducers[output] = spList;
                     }
                     spList.Add(cmd.Id);
+                }
+                else
+                {
+                    graph.FileToProducer.TryAdd(output, cmd.Id);
                 }
             }
         }

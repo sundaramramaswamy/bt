@@ -258,11 +258,18 @@ static class BuildGraphFactory
             }
         }
 
-        // CompileXaml: .xaml → generated .xaml.g.h, .g.cpp, .xbf
-        // Collect all CompileXaml tasks, then group by (project, target) to create
-        // one CommandNode per MSBuild target invocation.  The XAML compiler processes
-        // all pages in a project together; individual .xaml files aren't compilable
-        // in isolation.
+        // CompileXaml: .xaml → generated .g.h, .g.cpp, .xbf, XamlTypeInfo.g.cpp
+        // Two passes: Pass1 (before CL) and Pass2 (after CL, needs CreateWinMD).
+        // Pass2 cannot run standalone — the XAML compiler needs MSBuild's CL/
+        // CreateWinMD targets in the same invocation for reference resolution.
+        // We collapse both passes into ONE CommandNode per project that invokes
+        // msbuild /t:MarkupCompilePass1;ClCompile;CreateWinMD;MarkupCompilePass2.
+        // MSBuild's tlog-based incremental checking skips already-compiled CL
+        // sources; Pass1 has its own fingerprinting (XamlSaveStateFile.xml).
+        //
+        // Outputs from both passes are merged.  Pass1 owns overlapping files
+        // (.g.h, .xbf) via TryAdd first-wins.  Pass2 adds its unique output
+        // (XamlTypeInfo.g.cpp).
 
         // Extract Configuration, Platform, and MSBuild path for the command line.
         string? msbuildPath = null;
@@ -286,9 +293,10 @@ static class BuildGraphFactory
             if (msbuildPath != null && buildCfg != null && buildPlat != null) break;
         }
 
-        // Group CompileXaml tasks by (project file, target name)
-        var xamlGroups = new Dictionary<string, (string proj, string projDir, string projFile,
-            string target, List<string> inputs, List<string> outputs)>(StringComparer.OrdinalIgnoreCase);
+        // Collect CompileXaml tasks and merge outputs per project.
+        // Both Pass1 and Pass2 outputs feed the same CommandNode.
+        var xamlByProj = new Dictionary<string, (string proj, string projDir, string projFile,
+            List<string> inputs, List<string> outputs)>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var task in build.FindChildrenRecursive<MSTask>(t => t.Name == "CompileXaml"))
         {
@@ -298,7 +306,6 @@ static class BuildGraphFactory
                 ? Path.GetFullPath(projNode.ProjectFile) : "";
             var projDir = projNode?.ProjectFile != null
                 ? Path.GetDirectoryName(projFile) ?? "" : "";
-            var target = task.GetNearestParent<Target>()?.Name ?? "unknown";
             var pf = FindChildFolder(task.Children, "Parameters");
             if (pf == null) continue;
 
@@ -308,30 +315,27 @@ static class BuildGraphFactory
                 xamlInputs.AddRange(ParameterItems(pf, paramName, text => graph.ToRelative(ResolveAbsolute(projDir, text))));
             if (xamlInputs.Count == 0) continue;
 
-            // Gather output files from OutputItems
+            // Gather output files from OutputItems.
             var of = FindChildFolder(task.Children, "OutputItems");
             var taskOutputs = new List<string>();
             if (of != null)
             {
-                foreach (var paramName in new[] { "_GeneratedCodeFiles", "_GeneratedXbfFiles" })
+                for (int ci = 0; ci < of.Children.Count; ci++)
                 {
-                    for (int ci = 0; ci < of.Children.Count; ci++)
-                    {
-                        if (of.Children[ci] is not NamedNode nn || nn.Name != paramName) continue;
-                        for (int ji = 0; ji < nn.Children.Count; ji++)
-                            if (nn.Children[ji] is Item item)
-                                taskOutputs.Add(graph.ToRelative(ResolveAbsolute(projDir, item.Text)));
-                    }
+                    if (of.Children[ci] is not NamedNode nn) continue;
+                    if (nn.Name is not "_GeneratedCodeFiles" and not "_GeneratedXbfFiles") continue;
+                    for (int ji = 0; ji < nn.Children.Count; ji++)
+                        if (nn.Children[ji] is Item item)
+                            taskOutputs.Add(graph.ToRelative(ResolveAbsolute(projDir, item.Text)));
                 }
             }
             if (taskOutputs.Count == 0) continue;
 
-            // Merge into group
-            var groupKey = $"{projFile}|{target}";
-            if (!xamlGroups.TryGetValue(groupKey, out var grp))
+            // Merge into per-project group
+            if (!xamlByProj.TryGetValue(projFile, out var grp))
             {
-                grp = (proj, projDir, projFile, target, new List<string>(), new List<string>());
-                xamlGroups[groupKey] = grp;
+                grp = (proj, projDir, projFile, new List<string>(), new List<string>());
+                xamlByProj[projFile] = grp;
             }
             foreach (var i in xamlInputs)
                 if (!grp.inputs.Contains(i, StringComparer.OrdinalIgnoreCase))
@@ -341,23 +345,32 @@ static class BuildGraphFactory
                     grp.outputs.Add(o);
         }
 
-        // Create one CommandNode per (project, target) group
-        foreach (var (_, grp) in xamlGroups)
+        // Create one CommandNode per project.
+        foreach (var (_, grp) in xamlByProj)
         {
-            var cmdId = $"CompileXaml#{cmdIndex++}:{grp.proj}/{grp.target}";
+            var cmdId = $"CompileXaml#{cmdIndex++}:{grp.proj}/MarkupCompile";
 
-            // Build msbuild command line
             var cmdLine = "";
             if (msbuildPath != null && !string.IsNullOrEmpty(grp.projFile))
             {
-                var args = $"\"{grp.projFile}\" /t:{grp.target} /v:quiet /nologo";
+                // Combined target chain: Pass1, SelectClCompile (evaluates
+                // CL items and CppWinRT references — needed for XAML type
+                // resolution — without invoking cl.exe), then Pass2.
+                var targets = "MarkupCompilePass1;SelectClCompile;MarkupCompilePass2";
+                var args = $"\"{grp.projFile}\" /t:{targets} /v:quiet /nologo";
                 if (buildCfg != null) args += $" /p:Configuration={buildCfg}";
                 if (buildPlat != null) args += $" /p:Platform={buildPlat}";
+                // SolutionDir needed so OutDir/IntDir resolve to solution-level
+                // paths (e.g. for .winmd lookup during Pass2).
+                var solDir = rootDir.EndsWith('\\') ? rootDir : rootDir + "\\";
+                args += $" /p:SolutionDir={solDir}";
                 cmdLine = $"\"{msbuildPath}\" {args}";
             }
 
-            var cmd = new CommandNode(cmdId, "CompileXaml", grp.proj, grp.target,
-                grp.inputs, grp.outputs, cmdLine, grp.projDir);
+            if (grp.outputs.Count == 0) continue;
+
+            var cmd = new CommandNode(cmdId, "CompileXaml", grp.proj, "MarkupCompile",
+                grp.inputs, grp.outputs, cmdLine, rootDir);
             graph.Commands[cmdId] = cmd;
             foreach (var input in grp.inputs)
             {
