@@ -113,8 +113,8 @@ bt srcs --headers MyFile.cpp  # upstream sources + all #include headers
 
 - bt replays `cl.exe`/`link.exe` directly — it does NOT invoke MSBuild
   for those tools.  CompileXaml is the exception: it invokes
-  `msbuild /t:MarkupCompilePass1` (and Pass2) since the standalone
-  XAML compiler is broken.
+  `msbuild /t:MarkupCompilePass1;SelectClCompile;MarkupCompilePass2`
+  since the standalone XAML compiler is broken (~2s per project).
 - The first run after a binlog change parses and caches the graph (~700ms).
   Subsequent runs use the cache (~20ms).
 - New sources added to `.vcxproj` are inferred automatically — no full

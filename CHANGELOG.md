@@ -5,19 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
-## [Unreleased]
+## [652514a] - 2026-04-16
 
 ### Added
-- **CompileXaml execution**: dirty `.xaml` files now trigger XAML
-  compilation via `msbuild /t:MarkupCompilePass1` (and Pass2).
-  Previously bt only tracked `.xaml` dependencies but could not
-  regenerate `.xbf`, `.g.h`, or `.g.cpp` files.
+- **CompileXaml execution**: dirty `.xaml` files now trigger both XAML
+  compilation passes via a single `msbuild` invocation per project
+  (`/t:MarkupCompilePass1;SelectClCompile;MarkupCompilePass2`).
+  Pass1 produces `.g.h`, `.g.cpp`, `.xbf`; Pass2 produces
+  `XamlTypeInfo.g.cpp`.  bt then compiles the generated files via
+  direct CL and links.  `SolutionDir` is passed so paths resolve
+  correctly outside a solution build.
 
 ### Fixed
 - **`bt build` hangs in shells with debugger env vars**: shell vars
   like `_NT_SYMBOL_PATH`, `DBGHELP_*`, `PGOBuildMode` leaked into
   child processes, causing link.exe to hang on symbol server lookups.
   Child process environment is now built exclusively from the binlog.
+- **Synthetic `#include` overwrites real producers in cache**: when
+  loading from cache, `#include` commands were written to
+  `FileToProducer` (1:1), overwriting real producers like CompileXaml.
+  Now only stored in `SyntheticProducers` (1:N).
+- **`dirty`: all inputs at same max mtime now reported**: when
+  multiple inputs shared the newest timestamp, only one was shown
+  as the trigger.  Now all same-mtime inputs are listed.
 
 ### Changed
 - **`build` / `dirty` are now target-oriented (make-style)**:
@@ -284,3 +294,4 @@ Versions are identified by commit hash (short).
 | 1 | d28fcd1 | Initial FlatBuffers schema |
 | 2 | bd14db9 | Skip CreateWinMD; project on `#include` commands |
 | 3 | 67d71a2 | Global env from binlog Environment folder |
+| 4 | 652514a | CompileXaml Pass1+Pass2; `#include` excluded from `FileToProducer` in cache |

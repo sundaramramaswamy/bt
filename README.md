@@ -94,7 +94,7 @@ bt graph -p XaBench -f main.cpp       # combine (AND)
 | Link | `.obj` → `.exe` / `.dll` |
 | Lib | `.obj` → `.lib` |
 | MIDL | `.idl` → `.winmd` |
-| CompileXaml | `.xaml` → `.xbf` + `.g.h`/`.g.cpp` (via `msbuild /t:MarkupCompilePass1`, Pass2) |
+| CompileXaml | `.xaml` → `.xbf` + `.g.h`/`.g.cpp` (via `msbuild /t:MarkupCompilePass1;SelectClCompile;MarkupCompilePass2`) |
 | mdmerge | Unmerged `.winmd` → Merged `.winmd` |
 | makepri | Resources → `.pri` |
 | Copy | Payload assembly into AppX layout |

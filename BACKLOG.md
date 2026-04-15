@@ -45,13 +45,14 @@
       the flag to be enabled at build time.  Currently bt's `--headers`
       shows the flat tlog set which is complete but unstructured.
 - [ ] Direct XamlCompiler.exe invocation — currently bt invokes
-      `msbuild /t:MarkupCompilePass1` (~0.1s MSBuild eval overhead).
-      XamlCompiler.exe (`input.json` → `output.json`) would skip MSBuild
-      evaluation, but is broken: errors are silently swallowed (known bug
-      microsoft/microsoft-ui-xaml#10027) and `GetAssemblyItems()` in
-      `CompileXamlInternal.cs` crashes with a NullRef when any
-      `ReferenceAssemblies` are provided (no null guard on the list
-      parameter).  JSON schema is `CompilerInputs` in
+      `msbuild /t:MarkupCompilePass1;SelectClCompile;MarkupCompilePass2`
+      (~2s MSBuild eval overhead for both passes + CppWinRT reference
+      setup).  XamlCompiler.exe (`input.json` → `output.json`) would
+      skip MSBuild evaluation, but is broken: errors are silently
+      swallowed (known bug microsoft/microsoft-ui-xaml#10027) and
+      `GetAssemblyItems()` in `CompileXamlInternal.cs` crashes with a
+      NullRef when any `ReferenceAssemblies` are provided (no null guard
+      on the list parameter).  JSON schema is `CompilerInputs` in
       `Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop.dll`.  Revisit if
       Microsoft fixes #10027.
 
