@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## [744f0a5] - 2026-04-16
+
+### Fixed
+- **Crash when project directory no longer exists**: inference
+  enumerated `workingDir` from the binlog without checking it still
+  exists on disk.  A `git pull` that removes a project directory
+  caused `DirectoryNotFoundException` on any bt command.
+
 ## [652514a] - 2026-04-16
 
 ### Added
