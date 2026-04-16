@@ -28,6 +28,8 @@ static class SourceInference
 
         foreach (var (proj, workingDir) in projects)
         {
+            if (!Directory.Exists(workingDir)) continue;
+
             // Locate the .vcxproj.  cmd.Project may be a bare name ("XaBench"), a name with
             // extension, or a full path — GetFileNameWithoutExtension normalises all three.
             var projName = Path.GetFileNameWithoutExtension(proj);
