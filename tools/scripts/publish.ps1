@@ -220,6 +220,15 @@ try {
                     -Method Post -Headers $headers `
                     -ContentType 'application/zip' `
                     -Body $bytes | Out-Null
+
+                # Upload SHA256 checksum
+                $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+                $shaContent = [System.Text.Encoding]::UTF8.GetBytes("$sha  $name`n")
+                Invoke-RestMethod `
+                    -Uri "${uploadBase}?name=$name.sha256" `
+                    -Method Post -Headers $headers `
+                    -ContentType 'text/plain' `
+                    -Body $shaContent | Out-Null
             }
         } catch {
             Write-Host "GitHub release failed: $_" -ForegroundColor Yellow
