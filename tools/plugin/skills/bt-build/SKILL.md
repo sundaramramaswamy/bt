@@ -51,7 +51,8 @@ bt build                      # mtime-based — build only dirty files
 ### Build a specific target
 
 ```
-bt build MyApp.dll            # backward walk — only what this target needs
+bt build MyFile.cpp            # forward walk — compile + relink affected targets
+bt build MyApp.dll             # backward walk — only what this target needs
 bt build MyLib.lib             # build only this library
 ```
 
