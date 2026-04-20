@@ -21,7 +21,7 @@ if (Test-Path $btExe) {
 
 $owner = 'sundaramramaswamy'
 $repo  = 'bt'
-$apiUrl = "https://api.github.com/repos/$owner/$repo/releases/latest"
+$apiUrl = "https://api.github.com/repos/$owner/$repo/releases"
 
 # Detect architecture
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture
@@ -43,7 +43,11 @@ if (-not $token) {
 if ($token) { $headers['Authorization'] = "Bearer $token" }
 
 Write-Host "Fetching latest bt release ..." -ForegroundColor Cyan
-$release = Invoke-RestMethod -Uri $apiUrl -Headers $headers
+$releases = Invoke-RestMethod -Uri $apiUrl -Headers $headers
+if (-not $releases -or $releases.Count -eq 0) {
+    throw "No releases found at $apiUrl"
+}
+$release = $releases[0]
 
 $asset = $release.assets | Where-Object { $_.name -eq $assetName }
 if (-not $asset) {
