@@ -58,6 +58,17 @@ $zipPath = Join-Path $tempDir $assetName
 Write-Host "Downloading $assetName ..." -ForegroundColor Cyan
 Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile $zipPath
 
+# Verify SHA256 checksum if available
+$shaAsset = $release.assets | Where-Object { $_.name -eq "$assetName.sha256" }
+if ($shaAsset) {
+    $expected = (Invoke-RestMethod -Uri $shaAsset.browser_download_url -Headers $headers).Trim().Split()[0]
+    $actual = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) {
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        throw "Checksum mismatch for $assetName (expected $expected, got $actual)"
+    }
+}
+
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
 
