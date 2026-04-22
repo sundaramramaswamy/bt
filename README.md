@@ -91,7 +91,7 @@ bt graph -p XaBench -f main.cpp       # combine (AND)
 | Task | What it captures |
 |------|-----------------|
 | CL | `.cpp` → `.obj` (1:1 per source) |
-| Link | `.obj` → `.exe` / `.dll` |
+| Link | `.obj` → `.exe` / `.dll` (+ `.pdb` side-output) |
 | Lib | `.obj` → `.lib` |
 | MIDL | `.idl` → `.winmd` |
 | CompileXaml | `.xaml` → `.xbf` + `.g.h`/`.g.cpp` (via `msbuild /t:MarkupCompilePass1;SelectClCompile;MarkupCompilePass2`) |

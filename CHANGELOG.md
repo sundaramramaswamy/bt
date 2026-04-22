@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## Unreleased
+
+### Fixed
+- **LINK-produced `.pdb` missing from graph**: the linker's
+  `ProgramDatabaseFile` was not registered as an output of the LINK
+  command, so downstream Copy tasks (e.g. Binplace copying to
+  `Symbols\Product\`) silently dropped.  Editing a source no longer
+  leaves a stale PDB in the symbols directory.  `.pdb` is now classified
+  as a dev-visible output, so `graph -f <source>` shows the PDB branch
+  and `build`/`dirty <pdb>` resolve the backward cone correctly.
+
 ## [744f0a5] - 2026-04-16
 
 ### Fixed
@@ -303,3 +314,4 @@ Versions are identified by commit hash (short).
 | 2 | bd14db9 | Skip CreateWinMD; project on `#include` commands |
 | 3 | 67d71a2 | Global env from binlog Environment folder |
 | 4 | 652514a | CompileXaml Pass1+Pass2; `#include` excluded from `FileToProducer` in cache |
+| 5 | c52c635 | LINK `.pdb` tracked as a second output |
