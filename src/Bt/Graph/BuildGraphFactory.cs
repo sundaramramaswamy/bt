@@ -195,10 +195,30 @@ static class BuildGraphFactory
                 if (string.IsNullOrEmpty(outFile)) continue;
 
                 var cmdId = $"{toolName}#{cmdIndex++}:{proj}/{target}";
-                var cmd = new CommandNode(cmdId, toolName, proj, target, sources, [outFile], cmdLineRaw, projDir);
+                var outputs = new List<string> { outFile };
+
+                // LINK also produces a .pdb alongside the .dll/.exe (when debug
+                // info is enabled).  Register it so that downstream Copy tasks
+                // (e.g. Binplace copying to Symbols\Product\) wire up and mtime
+                // dirty-checking via the LINK command propagates to the PDB.
+                if (toolName == "LINK")
+                {
+                    var pdbFile = PropValue(pf, "ProgramDatabaseFile");
+                    if (!string.IsNullOrEmpty(pdbFile))
+                    {
+                        var pdbRel = graph.ToRelative(ResolveAbsolute(projDir, pdbFile));
+                        if (!string.Equals(pdbRel, outFile, StringComparison.OrdinalIgnoreCase))
+                            outputs.Add(pdbRel);
+                    }
+                }
+
+                var cmd = new CommandNode(cmdId, toolName, proj, target, sources, outputs, cmdLineRaw, projDir);
                 graph.Commands[cmdId] = cmd;
-                graph.Files.TryAdd(outFile, new FileNode(outFile, FileKinds.Classify(outFile)));
-                graph.FileToProducer[outFile] = cmdId;
+                foreach (var o in outputs)
+                {
+                    graph.Files.TryAdd(o, new FileNode(o, FileKinds.Classify(o)));
+                    graph.FileToProducer[o] = cmdId;
+                }
 
                 foreach (var input in sources)
                 {
