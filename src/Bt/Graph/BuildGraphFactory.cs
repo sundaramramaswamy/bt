@@ -98,6 +98,12 @@ static class BuildGraphFactory
             // Extract the full command line from binlog (available for CL, Link, Lib, MIDL)
             // CommandLineArguments is a child of the task, not inside the Parameters folder.
             var cmdLineRaw = PropValue(task, "CommandLineArguments").ReplaceLineEndings(" ").Trim();
+
+            // Skip tasks that MSBuild's incremental check deemed up-to-date:
+            // they appear in the binlog with Sources but no CommandLineArguments,
+            // so bt cannot replay them.
+            if (string.IsNullOrEmpty(cmdLineRaw)) continue;
+
             var sources = ParameterItems(pf, "Sources", text => graph.ToRelative(ResolveAbsolute(projDir, text)));
 
             // MIDL uses a Source property (singular), not Sources items
