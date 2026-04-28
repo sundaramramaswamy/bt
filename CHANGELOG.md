@@ -22,6 +22,8 @@ Versions are identified by commit hash (short).
   these into the graph as commands with empty command lines — `dirty`
   reported them as stale but `build` silently dropped them.  Now
   excluded at graph-construction time.
+- **LINK fails on large projects**: command lines exceeding the Win32
+  32K `CreateProcess` limit now use a response file (`@file`).
 
 ## [744f0a5] - 2026-04-16
 
