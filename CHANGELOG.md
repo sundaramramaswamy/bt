@@ -15,6 +15,13 @@ Versions are identified by commit hash (short).
   leaves a stale PDB in the symbols directory.  `.pdb` is now classified
   as a dev-visible output, so `graph -f <source>` shows the PDB branch
   and `build`/`dirty <pdb>` resolve the backward cone correctly.
+  PDB output is only registered when debug info is enabled.
+- **Phantom commands from skipped tasks**: when MSBuild's incremental
+  check deemed CL/LINK/LIB/MIDL tasks up-to-date, they appeared in the
+  binlog with `Sources` but no `CommandLineArguments`.  bt extracted
+  these into the graph as commands with empty command lines — `dirty`
+  reported them as stale but `build` silently dropped them.  Now
+  excluded at graph-construction time.
 
 ## [744f0a5] - 2026-04-16
 
@@ -312,6 +319,8 @@ Versions are identified by commit hash (short).
 |:---:|:---:|---|
 | 1 | d28fcd1 | Initial FlatBuffers schema |
 | 2 | bd14db9 | Skip CreateWinMD; project on `#include` commands |
-| 3 | 67d71a2 | Global env from binlog Environment folder |
+| 3 | 6748757 | Global env from binlog Environment folder |
 | 4 | 652514a | CompileXaml Pass1+Pass2; `#include` excluded from `FileToProducer` in cache |
-| 5 | c52c635 | LINK `.pdb` tracked as a second output |
+| 5 | d2bfef4 | LINK `.pdb` tracked as a second output |
+| 6 | d4a21e2 | Skip empty-cmdline tasks |
+| 7 | 3746fac | Gate PDB on `GenerateDebugInformation` |
