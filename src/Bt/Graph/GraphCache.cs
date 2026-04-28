@@ -5,7 +5,7 @@ using FlatSharp;
 /// Uses a sorted string table with integer indices for compact storage.
 static class GraphCache
 {
-    const int CacheVersion = 6;
+    const int CacheVersion = 7;
     static readonly ISerializer<GraphFb> Serializer = GraphFb.Serializer;
 
     public static void Save(string path, BuildGraph graph, DateTime binlogStamp)

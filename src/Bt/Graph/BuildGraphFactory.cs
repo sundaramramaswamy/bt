@@ -209,12 +209,19 @@ static class BuildGraphFactory
                 // dirty-checking via the LINK command propagates to the PDB.
                 if (toolName == "LINK")
                 {
-                    var pdbFile = PropValue(pf, "ProgramDatabaseFile");
-                    if (!string.IsNullOrEmpty(pdbFile))
+                    // Only register the .pdb when debug info is actually enabled.
+                    // Resource-only DLLs set GenerateDebugInformation=false but
+                    // still report ProgramDatabaseFile — that PDB is never produced.
+                    var genDbg = PropValue(pf, "GenerateDebugInformation");
+                    if (!genDbg.Equals("false", StringComparison.OrdinalIgnoreCase))
                     {
-                        var pdbRel = graph.ToRelative(ResolveAbsolute(projDir, pdbFile));
-                        if (!string.Equals(pdbRel, outFile, StringComparison.OrdinalIgnoreCase))
-                            outputs.Add(pdbRel);
+                        var pdbFile = PropValue(pf, "ProgramDatabaseFile");
+                        if (!string.IsNullOrEmpty(pdbFile))
+                        {
+                            var pdbRel = graph.ToRelative(ResolveAbsolute(projDir, pdbFile));
+                            if (!string.Equals(pdbRel, outFile, StringComparison.OrdinalIgnoreCase))
+                                outputs.Add(pdbRel);
+                        }
                     }
                 }
 
