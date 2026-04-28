@@ -244,6 +244,16 @@ static class BuildCommand
             }
         }
 
+        // MSVC tools (CL, LINK, LIB, MIDL) support response files (@file).
+        // CreateProcess has a ~32K char limit; use a temp .rsp when args are long.
+        string? rspFile = null;
+        if (args.Length > 30_000)
+        {
+            rspFile = Path.Combine(Path.GetTempPath(), $"bt_{Guid.NewGuid():N}.rsp");
+            File.WriteAllText(rspFile, args);
+            args = $"@\"{rspFile}\"";
+        }
+
         var psi = new System.Diagnostics.ProcessStartInfo(exe, args)
         {
             WorkingDirectory = cmd.WorkingDir,
@@ -281,6 +291,11 @@ static class BuildCommand
         catch (Exception ex)
         {
             return (1, ex.Message);
+        }
+        finally
+        {
+            if (rspFile is not null)
+                try { File.Delete(rspFile); } catch { }
         }
     }
 
