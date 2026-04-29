@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
-## Unreleased
+## [b710694] - 2026-04-29
 
 ### Fixed
 - **LINK-produced `.pdb` missing from graph**: the linker's
@@ -24,6 +24,10 @@ Versions are identified by commit hash (short).
   excluded at graph-construction time.
 - **LINK fails on large projects**: command lines exceeding the Win32
   32K `CreateProcess` limit now use a response file (`@file`).
+- **False dirty from toolchain libs**: SDK/toolchain inputs (e.g.
+  `libvcruntime.lib`) stored as absolute paths triggered false LINK
+  rebuilds after VS updates.  Absolute-path inputs are now skipped
+  in mtime checking — they are outside the repo by definition.
 
 ## [744f0a5] - 2026-04-16
 
