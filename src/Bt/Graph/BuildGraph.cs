@@ -494,6 +494,10 @@ class BuildGraph
                     var inputDir = Path.GetDirectoryName(input);
                     if (inputDir is not null && outputDirs.Contains(inputDir)) continue;
 
+                    // Skip external inputs (absolute paths are outside the
+                    // repo — toolchain/SDK libs that change only on updates).
+                    if (Path.IsPathRooted(input)) continue;
+
                     var mtime = mtimeCache.GetValueOrDefault(input);
                     if (mtime is { } t)
                     {
