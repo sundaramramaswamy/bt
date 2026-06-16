@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
+## Unreleased
+
+### Fixed
+- **Inferred sources now have precise header edges**: when a `.cpp`
+  is added to a `.vcxproj` after the binlog was captured, bt infers
+  the CL command and now spawns `cl /showIncludes /Zs` to wire its
+  actual `#include` graph.  Previously such sources had no header
+  edges, so a header edit elsewhere in the same project could
+  silently leave the inferred `.obj` stale and crash at runtime
+  (`STATUS_HEAP_CORRUPTION 0xC0000374`, guard-block `0xC0000420`).
+  PCH-internal headers (which `/showIncludes` cannot see through
+  `/Yu`) are copied from the project's `/Yc pch.cpp` edges.  No new
+  flags or env vars.  Header probing runs only for `bt build`,
+  `bt dirty`, and `bt watch` — query commands skip it.
+
 ## [b710694] - 2026-04-29
 
 ### Fixed
