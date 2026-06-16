@@ -2,6 +2,10 @@ static class DirtyCommand
 {
     public static int Affected(BuildGraph g, string[] explicitFiles)
     {
+        // Wire precise header edges for inferred sources before any dirty check.
+        // No-op when no inference fired this load.
+        InferredHeaderProbe.Enrich(g);
+
         HashSet<string>? commandScope = null;
         if (explicitFiles.Length > 0)
         {
