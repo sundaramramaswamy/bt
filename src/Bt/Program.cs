@@ -305,6 +305,7 @@ static BuildGraph LoadGraph(string binlogPath)
     catch (Exception ex) { Console.Error.WriteLine($"{Clr.Dim}cache write failed: {ex.Message}{Clr.Reset}"); }
 
     infer:
+    graph.BinlogTimestamp = binlogStamp;
     var inf = SourceInference.InferNewSources(graph, binlogPath);
     if (inf.InferredCount > 0)
         Console.Error.WriteLine(

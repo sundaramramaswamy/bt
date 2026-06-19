@@ -3,6 +3,10 @@ class BuildGraph
     /// Root directory all stored paths are relative to (typically solution dir).
     public required string RootDir { get; init; }
 
+    /// Binlog file timestamp (mtime). Used by HeaderProbe to detect sources
+    /// whose include closure may have drifted since the last MSBuild run.
+    public DateTime BinlogTimestamp { get; set; }
+
     public Dictionary<string, FileNode> Files { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, CommandNode> Commands { get; init; } = [];
 
