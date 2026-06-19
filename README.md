@@ -116,6 +116,8 @@ bt graph -p XaBench -f main.cpp       # combine (AND)
 
 6. **Inference** — On every run, `bt` compares each project file's mtime against the binlog's. If a `.vcxproj` (or imported `.vcxitems`) is newer, `bt` parses it for `<ClCompile>` sources not yet in the graph and synthesises compile/link commands by mirroring flags from a peer source in the same project. This lets you add a `.cpp` to a project and immediately `bt build` — no full MSBuild run required. A warning is emitted if the new source has per-file metadata (optimization overrides etc.); in that case the peer's flags are used and a full rebuild is recommended for exact flags.
 
+7. **Header probe** — Before any dirty check, `bt` reprobes `#include` edges for sources whose include closure may have drifted since the binlog: inferred sources (no tlog data), and existing sources whose `.cpp` or headers are newer than the binlog. Each is probed with `cl /showIncludes /Zs` (preprocess-only, PCH disabled) and the discovered edges are wired into the graph.
+
 ## Building
 
 For a local, self-contained build:

@@ -5,20 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions are identified by commit hash (short).
 
-## Unreleased
+## [a2a8215] - 2026-06-19
 
 ### Fixed
-- **Inferred sources now have precise header edges**: when a `.cpp`
-  is added to a `.vcxproj` after the binlog was captured, bt infers
-  the CL command and now spawns `cl /showIncludes /Zs` to wire its
-  actual `#include` graph.  Previously such sources had no header
-  edges, so a header edit elsewhere in the same project could
-  silently leave the inferred `.obj` stale and crash at runtime
-  (`STATUS_HEAP_CORRUPTION 0xC0000374`, guard-block `0xC0000420`).
-  PCH-internal headers (which `/showIncludes` cannot see through
-  `/Yu`) are copied from the project's `/Yc pch.cpp` edges.  No new
-  flags or env vars.  Header probing runs only for `bt build`,
-  `bt dirty`, and `bt watch` — query commands skip it.
+- **Header probe eliminates ODR corruption from stale tlog edges**:
+  bt never writes tlogs, so `#include` edges added during a bt session
+  were invisible until the next `msbuild /bl`.  A later layout change
+  to an unseen header silently left consumers stale → heap corruption
+  (`0xC0000374` / `0xC0000420`).  bt now spawns `cl /showIncludes /Zs`
+  to discover the actual include closure for two classes of sources:
+  (1) inferred sources (`.cpp` added to `.vcxproj` after the binlog —
+  no tlog data at all), and (2) existing sources whose `.cpp` or any
+  tlog-known header has mtime newer than the binlog.  PCH flags are
+  stripped (`/Y-`) so the probe doesn't depend on a `.pch` file;
+  PCH-internal headers are copied from the `/Yc pch.cpp` edges.
+  Probing runs only for `bt build`, `bt dirty`, and `bt watch` —
+  query commands skip it.
 
 ## [b710694] - 2026-04-29
 
