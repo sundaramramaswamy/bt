@@ -43,6 +43,37 @@ if ($Commit) {
     git checkout --quiet $resolved
 }
 
+# --- Auto-detect docs commit and step back to code commit ---
+if (-not $Commit) {
+    $headHash = git rev-parse --short HEAD
+    $clPath = Join-Path $root 'CHANGELOG.md'
+    if (Test-Path $clPath) {
+        $clTop = Select-String -Path $clPath -Pattern '^\#\# \[([0-9a-f]+)\]' |
+            Select-Object -First 1
+        if ($clTop) {
+            $clHash = $clTop.Matches[0].Groups[1].Value
+            $parentHash = git rev-parse --short "HEAD~1" 2>$null
+            if ($headHash -ne $clHash -and $parentHash -eq $clHash) {
+                # HEAD diverges from CHANGELOG — check if it's docs-only
+                $changedFiles = git diff --name-only HEAD~1 HEAD
+                $docsOnly = $true
+                foreach ($f in $changedFiles) {
+                    if ($f -notmatch '(?i)^(CHANGELOG|README|BACKLOG)\.md$') {
+                        $docsOnly = $false
+                        break
+                    }
+                }
+                if ($docsOnly) {
+                    Write-Host "HEAD ($headHash) is a docs commit; building from $clHash instead." -ForegroundColor Yellow
+                    $originalRef = git symbolic-ref --short HEAD 2>$null
+                    if (-not $originalRef) { $originalRef = git rev-parse HEAD }
+                    git checkout --quiet "$parentHash"
+                }
+            }
+        }
+    }
+}
+
 # --- Preflight: check HEAD is pushed to origin ---
 if (-not $PackOnly) {
     git fetch origin --quiet 2>$null
