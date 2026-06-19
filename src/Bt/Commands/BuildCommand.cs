@@ -4,9 +4,9 @@ static class BuildCommand
 
     public static BuildResult RunBuild(BuildGraph g, string[] explicitFiles, int maxJobs, bool dryRun, bool compileOnly = false)
     {
-        // Wire precise header edges for inferred sources before any dirty check.
-        // No-op when no inference fired this load.
-        InferredHeaderProbe.Enrich(g);
+        // Wire precise header edges for inferred and stale-tlog sources
+        // before any dirty check.
+        HeaderProbe.Enrich(g);
 
         List<CommandNode> plan;
 
